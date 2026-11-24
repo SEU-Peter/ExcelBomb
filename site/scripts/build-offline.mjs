@@ -1,0 +1,24 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import './build-worker.mjs';
+
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const dist=path.join(root,'dist');
+const read=name=>fs.readFileSync(path.join(dist,name),'utf8');
+const dataURL=(name,mime)=>`data:${mime};base64,${fs.readFileSync(path.join(dist,name)).toString('base64')}`;
+const scriptSafe=source=>source.replace(/<\/script/gi,'<\\/script');
+let html=read('index.html');
+const css=read('style.css').replaceAll("url('vendor/pacifico.ttf')",`url('${dataURL('vendor/pacifico.ttf','font/ttf')}')`).replaceAll("url('vendor/dm-sans.ttf')",`url('${dataURL('vendor/dm-sans.ttf','font/ttf')}')`);
+html=html.replace('href="icon.svg"',`href="${dataURL('icon.svg','image/svg+xml')}"`);
+html=html.replace('<link rel="stylesheet" href="style.css">',()=>`<style>\n${css}\n</style>`);
+html=html.replace(/<script[^>]+src="(?:vendor\/xlsx.full.min.js|vendor\/jszip.min.js|app.js)"[^>]*><\/script>/g,'');
+const core=read('core.js').replace(/^export /gm,'');
+const app=read('app.js').replace(/^import .* from '\.\/core.js';\r?\n/m,'');
+const scripts=['vendor/xlsx.full.min.js','vendor/jszip.min.js'].map(name=>`<script>\n${scriptSafe(read(name))}\n</script>`).join('\n');
+const workerSource=['vendor/xlsx.full.min.js','vendor/jszip.min.js','worker.js'].map(read).join('\n');
+html=html.replace('</body>',()=>`<script id="excelbomb-worker-source" type="text/plain">\n${scriptSafe(workerSource)}\n</script>\n${scripts}\n<script>\n(()=>{\n${scriptSafe(core)}\n${scriptSafe(app)}\n})();\n</script>\n</body>`);
+if(/(?:src|href)="(?:vendor\/|app\.js|style\.css|core\.js)/.test(html))throw new Error('Offline build contains an external asset dependency.');
+const output=path.resolve(root,'..','ExcelBomb.html');
+fs.writeFileSync(output,html);
+console.log(`Offline build: ${output} (${fs.statSync(output).size.toLocaleString()} bytes)`);

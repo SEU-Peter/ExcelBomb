@@ -1,0 +1,1 @@
+{"name":"excelbomb","version":"1.1.0","private":true,"type":"module","scripts":{"start":"python3 scripts/local_server.py --serve","test":"node tests/core.test.mjs","build:worker":"node scripts/build-worker.mjs","build:offline":"node scripts/build-offline.mjs"}}

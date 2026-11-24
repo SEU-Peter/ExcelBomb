@@ -1,0 +1,1 @@
+{"name":"excelbomb-win7-builder","private":true,"type":"module","devDependencies":{"@babel/core":"7.28.6","@babel/preset-env":"7.28.5","core-js-bundle":"3.47.0","acorn":"8.15.0","postcss":"8.5.6"}}

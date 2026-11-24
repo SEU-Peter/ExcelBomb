@@ -1,0 +1,16 @@
+.DS_Store
+**/.DS_Store
+**/node_modules/
+**/__pycache__/
+*.pyc
+.local-backups/
+/releases/
+excelbomb-deploy.tar.gz
+site/.openai/
+site/win7/launcher/web/
+site/win7/launcher/launcher-test
+site/win7/build-report.json
+playwright-report/
+test-results/
+.env
+.env.*
