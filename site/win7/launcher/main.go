@@ -30,7 +30,7 @@ import (
 var embedded embed.FS
 
 const identity = "ExcelBomb-Win7"
-const version = "1.1.0-win7"
+const version = "1.1.1-win7"
 
 type application struct {
 	assets fs.FS
@@ -146,6 +146,11 @@ func client() *http.Client {
 }
 
 func probe(addr string) bool {
+	return probeVersion(addr, true)
+}
+
+// Upgrades may stop an older ExcelBomb, but never an unrelated local service.
+func probeVersion(addr string, currentVersion bool) bool {
 	response, err := client().Get("http://" + addr + "/__excelbomb_health")
 	if err != nil {
 		return false
@@ -155,13 +160,13 @@ func probe(addr string) bool {
 		App     string `json:"app"`
 		Version string `json:"version"`
 	}
-	return response.StatusCode == 200 && response.Header.Get("X-ExcelBomb") == identity && json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&status) == nil && status.App == identity && status.Version == version
+	return response.StatusCode == 200 && response.Header.Get("X-ExcelBomb") == identity && json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&status) == nil && status.App == identity && (!currentVersion || status.Version == version)
 }
 
 var tokenPattern = regexp.MustCompile(`<meta name="excelbomb-session" content="([a-f0-9]{64})">`)
 
 func stopService(addr string) error {
-	if !probe(addr) {
+	if !probeVersion(addr, false) {
 		return errors.New("未找到正在运行的 ExcelBomb Win7 服务。")
 	}
 	response, err := client().Get("http://" + addr + "/")
@@ -197,7 +202,7 @@ func validAddress(addr string) bool {
 }
 
 func diagnostics(addr string) error {
-	text := fmt.Sprintf("ExcelBomb Win7 diagnostics\r\nVersion: %s\r\nBuild: %s\r\nArchitecture: %s\r\nAddress: %s\r\nOwn service available: %v\r\nBrowser candidates: %s\r\n\r\nNative Windows 7/IE11 verification must be completed on the target PC.\r\nNo workbook data is included.\r\n", version, runtime.Version(), runtime.GOARCH, addr, probe(addr), strings.Join(browserCandidates(), "; "))
+	text := fmt.Sprintf("ExcelBomb Win7 diagnostics\r\nVersion: %s\r\nBuild: %s\r\nArchitecture: %s\r\nAddress: %s\r\nOwn service available: %v\r\nBrowser candidates: %s\r\n%s\r\nNative Windows 7/IE11 verification must be completed on the target PC.\r\nNo workbook data is included.\r\n", version, runtime.Version(), runtime.GOARCH, addr, probe(addr), strings.Join(browserCandidates(), "; "), installationDiagnostics())
 	executable, _ := os.Executable()
 	directory := filepath.Dir(executable)
 	if strings.EqualFold(filepath.Base(filepath.Dir(directory)), "bin") {
@@ -217,11 +222,25 @@ func run(args []string) error {
 	noBrowser := flags.Bool("no-browser", false, "do not open browser")
 	stop := flags.Bool("stop", false, "stop own local service")
 	check := flags.Bool("check", false, "write diagnostics")
+	install := flags.Bool("install", false, "install for current user and enable logon startup")
+	enable := flags.Bool("enable-autostart", false, "enable logon startup for installed application")
+	disable := flags.Bool("disable-autostart", false, "disable logon startup")
+	uninstall := flags.Bool("prepare-uninstall", false, "stop service and remove installation integrations")
+	autostart := flags.Bool("autostart", false, "start silently at user logon")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if !validAddress(*addr) {
 		return errors.New("只允许使用 127.0.0.1 本机地址和有效端口。")
+	}
+	if *install || strings.EqualFold(filepath.Base(os.Args[0]), "Install-ExcelBomb.exe") {
+		return installForUser()
+	}
+	if *enable || *disable || *uninstall {
+		return manageInstallation(*enable, *uninstall)
+	}
+	if *autostart {
+		*noBrowser = true
 	}
 	if *check {
 		return diagnostics(*addr)
@@ -273,7 +292,17 @@ func run(args []string) error {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		showError(err.Error())
+		quiet := false
+		for _, arg := range os.Args[1:] {
+			if arg == "--autostart" || arg == "-autostart" {
+				quiet = true
+			}
+		}
+		if quiet {
+			logStartupError(err)
+		} else {
+			showError(err.Error())
+		}
 		os.Exit(1)
 	}
 }

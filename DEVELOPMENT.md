@@ -61,7 +61,7 @@ node tests/browser.test.mjs
 python3 scripts/package-macos.py
 ```
 
-脚本先同步离线 HTML，再打包启动脚本、本地服务、全部网页资源、离线 HTML、虚构测试表格和中文说明，保留 `.command` 执行权限。输出 `releases/ExcelBomb-macOS-1.1.0.zip` 及对应 `.sha256`；使用包不含 Node/Python 运行时。
+脚本先同步离线 HTML，再打包启动脚本、本地服务、全部网页资源、离线 HTML、虚构测试表格和中文说明，保留 `.command` 执行权限。输出 `releases/ExcelBomb-macOS-1.1.1.zip` 及对应 `.sha256`；使用包不含 Node/Python 运行时。
 
 ## Win7 使用包
 
@@ -73,7 +73,13 @@ npm ci
 node package.mjs /绝对路径/go1.20.14/bin/go
 ```
 
-脚本生成 ES5 网页并检查语法，关闭 CGO，分别交叉构建 x86（softfloat）和 x64 启动器，核对 PE 架构、Windows GUI 6.1 子系统及静态导入。输出 `releases/ExcelBomb-Win7-1.1.0.zip`、对应 `.sha256` 和解压目录，附构建检查信息、第三方许可证与测试数据。
+脚本生成 ES5 网页并检查语法，关闭 CGO，分别交叉构建 x86（softfloat）和 x64 启动器，核对 PE 架构、Windows GUI 6.1 子系统及静态导入。通过 `tools/go.mod` 与 `go.sum` 固定的 rsrc v0.10.2 生成两种架构的资源文件，内嵌 `asInvoker` 清单，避免 32 位安装器被 Windows 安装器识别机制要求提权。首次构建需联网取得锁定的开发依赖，目标电脑安装/使用无需联网。
+
+输出 `releases/ExcelBomb-Win7-1.1.1.zip`（32/64 位通用）、`ExcelBomb-Win7-x86-1.1.1.zip`（32 位专用）、对应 `.sha256` 和解压目录，附构建检查信息、第三方许可证与测试数据。两个包的 `Install-ExcelBomb.exe` 均为 x86，安装时用 Windows 原生 API 判断系统位数；不以环境变量判断安装架构。
+
+安装逻辑位于 `launcher/install*.go`：通过 SHGetFolderPathW 取得当前用户目录，用 Windows Shell COM 创建桌面快捷方式，在 HKCU Run 写入带引号的安装路径和 `--autostart`，并注册当前用户卸载入口。登录自启只启动本地服务、不打开浏览器，失败写本机日志。管理入口只操作已确认的 ExcelBomb 安装记录；升级可验证旧版服务的身份和会话令牌后关闭自身服务。Windows 原生注册表和 Shell COM 在 macOS 上不能实际执行，交叉构建与逻辑测试不得写成安装真机验证。
+
+实现依据：[Windows Run 注册表项](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys)、[应用清单](https://learn.microsoft.com/en-us/windows/win32/sbscs/application-manifests)、[IShellLinkW](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishelllinkw)。
 
 只重建兼容网页可执行 `node build.mjs`。生成目录 `launcher/web/` 不提交；直接编译 Go 前必须先完成网页构建。
 
@@ -94,4 +100,4 @@ CGO_ENABLED=0 /绝对路径/go1.20.14/bin/go test ./...
 
 ## 发布
 
-保持两平台版本一致，核对两个 ZIP、许可证、测试文件和 SHA-256，按 [发布说明](docs/releases/v1.1.0.md) 更新说明。将平台 ZIP 与 `SHA256SUMS.txt` 上传到同一 Release；不要把 `node_modules`、历史站点配置、运行日志、实际业务数据或凭据提交到仓库。构建产物留在 `releases/`，开发源码通过 Git 管理。
+保持两平台版本一致，核对各 ZIP、许可证、测试文件和 SHA-256，按 [发布说明](docs/releases/v1.1.1.md) 更新说明。将平台 ZIP 与 `SHA256SUMS.txt` 上传到同一 Release；不要把 `node_modules`、历史站点配置、运行日志、实际业务数据或凭据提交到仓库。构建产物留在 `releases/`，开发源码通过 Git 管理。

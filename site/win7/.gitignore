@@ -1,3 +1,4 @@
 node_modules/
 launcher/web/
 launcher/launcher-test
+launcher/*.syso

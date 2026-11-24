@@ -2,7 +2,7 @@
 
 一个只在本机运行的 Excel 工作台，用可视化操作完成拆表、合表和 Lookup。无需安装 Office，支持读取 `.xlsx`、`.xls`、`.csv`，统一导出 `.xlsx`。
 
-**[下载最新版本](https://github.com/SEU-Peter/ExcekBomb/releases/latest)** · [v1.1.0 发布说明](docs/releases/v1.1.0.md) · [开发与测试说明](DEVELOPMENT.md)
+**[下载最新版本](https://github.com/SEU-Peter/ExcekBomb/releases/latest)** · [v1.1.1 发布说明](docs/releases/v1.1.1.md) · [开发与测试说明](DEVELOPMENT.md)
 
 本项目的 GitHub 仓库名为 **ExcekBomb**，软件名称为 **ExcelBomb**。GitHub 用于源码管理与安装包分发；软件仅在本地运行，不提供在线处理网站。选择的表格在浏览器内处理，不上传到服务器，原文件不会被修改。
 
@@ -14,14 +14,28 @@
 
 | 系统 | 下载文件 | 启动方式 |
 | --- | --- | --- |
-| macOS | `ExcelBomb-macOS-1.1.0.zip` | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
-| Windows 7 | `ExcelBomb-Win7-1.1.0.zip` | 双击 `Start-ExcelBomb.cmd`，自动选择 32/64 位程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
+| macOS | `ExcelBomb-macOS-1.1.1.zip` | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
+| Windows 7 32 位 | `ExcelBomb-Win7-x86-1.1.1.zip` | 双击 `Install-ExcelBomb.exe` 一键安装并开启登录自启；也可用 `Start-ExcelBomb.cmd` 免安装运行。 |
+| Windows 7 32/64 位通用 | `ExcelBomb-Win7-1.1.1.zip` | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
 
 启动器打开 `http://127.0.0.1:8769/`，服务只监听本机。所有脚本、字体和处理库均随包附带，使用时无需联网。两个平台都附带虚构测试表格，可先用 `test/` 体验功能。
 
 **macOS：** 使用当前版本的 Safari、Chrome、Edge 或 Firefox。发行包是本地网页与启动脚本的组合，不是经过签名的 `.app` 安装器。没有 Python 3 时，直接打开随包的离线 HTML 即可。关闭页面不会停止通过启动器开启的本地服务。
 
 **Win7：** 目标环境为 Windows 7 SP1，配合 IE11 标准模式或本机已安装的兼容浏览器；不支持 IE8、IE9、IE10。可通过 `Stop-ExcelBomb.cmd` 关闭自身服务，`Check-ExcelBomb.cmd` 生成不含表格内容的诊断文件。当前包已完成静态检查和现代浏览器兼容路径测试，**尚未在真实 Win7 / IE11 机器上验证**，建议先用附带表格核对。
+
+### Win7 一键安装与开机自启
+
+完整解压 ZIP 后，双击 **`Install-ExcelBomb.exe`**。程序安装到当前用户的 `%LOCALAPPDATA%\ExcelBomb`，创建桌面 **ExcelBomb** 快捷方式，并默认开启当前用户登录 Windows 后的后台自启；不自动弹出网页。使用时双击桌面入口即可，无需保留原解压文件夹。安装只写当前用户目录和注册表，无需管理员权限。
+
+- 安装器本身为原生 **x86 / PE32**，兼容 Win7 32 位。通用包在 64 位系统中安装 x64 程序；x86 专用包始终安装 32 位程序。
+- `Disable-Autostart.cmd`：关闭登录自启，不停止当前服务。
+- `Enable-Autostart.cmd`：重新开启已安装版本的登录自启。
+- `Uninstall-ExcelBomb.cmd` 或控制面板「程序和功能」：停止自身服务，移除自启、桌面入口和安装文件。请把导出的业务文件放在自己的文档目录。
+- 仅双击 `Start-ExcelBomb.cmd` 是免安装使用，不会注册自启；安装与免安装模式共享本机端口，同一时间运行一个版本。
+- 自启失败信息写入安装目录 `logs/startup.log`，诊断文件可核对安装位置、自启命令和服务状态。自启发生在用户登录后，不是登录前的系统服务。
+
+安装和自启均无需 PowerShell、VBScript、计划任务或联网。新版安装会先验证并停止已有的 ExcelBomb Win7 服务；端口被其他软件占用时会报告问题。
 
 ## 三种操作
 

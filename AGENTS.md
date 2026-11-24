@@ -13,3 +13,4 @@
 - `dist/worker.js` 由 `scripts/build-worker.mjs` 生成。处理逻辑改动后运行 `npm run build:offline`，同步后台 Worker 与离线 HTML，并测试两种入口。
 - 用户要求独立 Win7 版本，保留当前 Mac 版。Win7 源码与构建放在 `site/win7/`，交付包放在 `releases/`；禁止使用新 Go/Python/Node 运行时假充 Win7 兼容程序。
 - Win7 启动器必须固定 Go 1.20.14、CGO=0，分别生成 x86/x64；网页必须检查 ES5 语法、IE11 文件读取和保存分支、弹窗/折叠区、无后台线程降级与旧布局。明确区分模拟、静态检查和 Win7 真机验证。
+- Win7 一键安装器本身必须为 x86，内嵌 asInvoker 清单；默认安装当前用户目录、创建桌面入口并启用登录后后台自启，不弹网页。保留自启开关、卸载、免安装入口和 x86 专用包；安装不得依赖 PowerShell、VBScript 或目标电脑额外运行时。
