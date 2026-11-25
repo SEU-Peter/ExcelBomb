@@ -8,15 +8,26 @@
 
 ![ExcelBomb 拆表预览](docs/images/split.png)
 
+## 当前版本：v1.1.3
+
+- **有效数据识别：** 自动忽略多余空行、外围空列及纯格式区域，避免普通表格因工作表声明范围过大而无法处理。已用 40 列 × 685 行、685 列 × 40 行及声明范围覆盖整张工作表的模拟文件验证。
+- **全宽预览：** 文件设置放在上方，数据表格使用下方完整宽度，支持展开核对；默认每页 100 行，可选到 500 行。
+- **全部分组展示：** 拆分结果以多列清单连续显示，不再分页，保留搜索、改名、合并和撤销。
+- **表头提取布局：** “提取表头”按钮紧随文件、工作表与表头行设置；提取完成后显示字段和数据预览。
+
+完整变更见 [v1.1.3 发布说明](docs/releases/v1.1.3.md)。
+
 ## 下载与启动
 
 请在 Release 的 **Assets** 中下载对应平台的 ZIP；GitHub 自动生成的「Source code」是开发源码，不是使用包。完整解压后再启动。
 
 | 系统 | 下载文件 | 启动方式 |
 | --- | --- | --- |
-| macOS | `ExcelBomb-macOS-1.1.3.zip` | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
-| Windows 7 32 位 | `ExcelBomb-Win7-x86-1.1.3.zip` | 完整解压后双击顶层唯一的 `01-Install-ExcelBomb.exe`。`00-Start-Here.html` 提供中文图文安装指引。 |
-| Windows 7 32/64 位通用 | `ExcelBomb-Win7-1.1.3.zip` | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
+| macOS | [下载 Mac 版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.3/ExcelBomb-macOS-1.1.3.zip) | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
+| Windows 7 32 位 | [下载 Win7 x86 版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.3/ExcelBomb-Win7-x86-1.1.3.zip) | 完整解压后双击顶层唯一的 `01-Install-ExcelBomb.exe`。`00-Start-Here.html` 提供中文图文安装指引。 |
+| Windows 7 32/64 位通用 | [下载 Win7 通用版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.3/ExcelBomb-Win7-1.1.3.zip) | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
+
+仓库为私有开发仓库，查看源码和下载附件需要登录有访问权限的 GitHub 账号。
 
 启动器打开 `http://127.0.0.1:8769/`，服务只监听本机。所有脚本、字体和处理库均随包附带，使用时无需联网。两个平台都附带虚构测试表格，Mac 位于 `test/`，Win7 位于 `Support/test/`。
 
@@ -54,7 +65,7 @@ ExcelBomb-Win7/
 
 ### 拆表
 
-1. 选择文件、工作表和表头行，点击提取字段。表头行默认是第一行。
+1. 选择文件、工作表和表头行，点击设置下方的 **提取表头**。表头行默认是第一行。
 2. 选择一个字段生成分组，全部分组以多列清单连续展示，无需翻页；可搜索、查看数据、重命名，或选择多个分组后合并，操作支持撤销。
 3. 核对最终文件名，确认后下载 ZIP。每组生成一张 Excel，例如 `一室-23.xlsx`、`二室-34.xlsx`。数字代表数据条目数，不包括表头；特殊字符和重名会提前处理，预览与实际下载保持一致。
 
@@ -94,7 +105,40 @@ ExcelBomb-Win7/
 
 ## 源码与第三方组件
 
-现代版实现位于 `site/dist/`，Win7 独立适配与原生启动器位于 `site/win7/`。克隆、构建、测试和双平台打包命令见 [DEVELOPMENT.md](DEVELOPMENT.md)。仓库不包含云端部署流程。
+### 从源码运行
+
+有仓库访问权限时，可克隆源码并使用 Python 3 启动本地服务：
+
+```sh
+git clone https://github.com/SEU-Peter/ExcekBomb.git
+cd ExcekBomb
+python3 site/scripts/local_server.py --serve
+```
+
+浏览器打开 <http://127.0.0.1:8769/>。也可直接打开仓库根目录的 `ExcelBomb.html`，无需安装开发工具。
+
+修改网页后，使用 Node.js 18 或更新版本同步 Worker 和离线文件并运行核心检查：
+
+```sh
+cd site
+npm run build:offline
+npm test
+```
+
+现代版运行库已随源码附带，上述构建无需安装 npm 依赖。Win7 构建另外使用锁定的开发依赖和 Go 1.20.14；具体命令及浏览器测试方法见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+
+| 目录 / 文件 | 内容 |
+| --- | --- |
+| `site/dist/` | 网页、数据处理逻辑、生成的 Worker 与本地资源 |
+| `site/src/`、`site/scripts/` | Worker 入口、离线构建与本地服务 |
+| `site/win7/` | Win7 兼容层、原生安装/启动器及构建脚本 |
+| `site/tests/` | 核心逻辑、真实 XLSX 读写和浏览器回归检查 |
+| `test/` | 可手动体验功能的虚构测试表格 |
+| `docs/releases/` | 各版本发布说明 |
+
+GitHub 管理开发源码，安装包通过 Release 附件分发；`releases/`、本机配置、依赖缓存和历史站点凭据不提交到仓库。仅在明确要求打包或生成 Release 时发布新版本，不部署在线应用。
+
+### 第三方资源
 
 运行资源包括 SheetJS CE 0.20.3、JSZip 3.10.1、Pacifico 与 DM Sans 字体；Win7 还使用 core-js 兼容层及 Go 标准库。各自许可证随使用包提供，源码中的网页资源许可证见 [site/dist/vendor/licenses](site/dist/vendor/licenses)。
 
