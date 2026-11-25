@@ -16,6 +16,25 @@ import (
 )
 
 const localAddress = "127.0.0.1:8769"
+const installerFilename = "01-Install-ExcelBomb.exe"
+
+func isInstallerExecutable(name string) bool {
+	name = filepath.Base(name)
+	return strings.EqualFold(name, installerFilename) || strings.EqualFold(name, "Install-ExcelBomb.exe")
+}
+
+// Keep the public package to three entries; resources live under Support.
+// Older flat packages and direct --install from bin remain supported.
+func installPayloadRoot(executable string) string {
+	root := filepath.Dir(executable)
+	if strings.EqualFold(filepath.Base(filepath.Dir(root)), "bin") {
+		return filepath.Dir(filepath.Dir(root))
+	}
+	if info, err := os.Stat(filepath.Join(root, "Support", "bin")); err == nil && info.IsDir() {
+		return filepath.Join(root, "Support")
+	}
+	return root
+}
 
 type installPaths struct{ directory, desktop string }
 type installRecord struct {
@@ -45,7 +64,7 @@ func selectedExecutable(root string, is64 bool) (string, error) {
 		}
 		return name, nil
 	}
-	return "", errors.New("安装文件不完整。请先完整解压 ZIP，再运行 Install-ExcelBomb.exe。")
+	return "", errors.New("安装文件不完整。请先右键 ZIP 选择“全部提取”，保持 Support 文件夹与 01-Install-ExcelBomb.exe 在同一目录，再双击安装程序。")
 }
 
 func validateExecutable(data []byte, arch string) error {
@@ -187,12 +206,9 @@ func installForUser() error {
 	if err != nil {
 		return err
 	}
-	root := filepath.Dir(executable)
-	if strings.EqualFold(filepath.Base(filepath.Dir(root)), "bin") {
-		root = filepath.Dir(filepath.Dir(root))
-	}
+	root := installPayloadRoot(executable)
 	if strings.EqualFold(filepath.Clean(root), filepath.Clean(paths.directory)) {
-		return errors.New("请从完整解压的安装包运行 Install-ExcelBomb.exe。")
+		return errors.New("请从完整解压的安装包运行 01-Install-ExcelBomb.exe。")
 	}
 	source, err := selectedExecutable(root, native64Bit())
 	if err != nil {

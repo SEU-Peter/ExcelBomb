@@ -28,6 +28,34 @@ func fixturePE(arch string) []byte {
 	return data
 }
 
+func TestOrganizedAndLegacyPackageEntrypoints(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "中文 安装目录")
+	payload := filepath.Join(root, "Support")
+	if err := os.MkdirAll(filepath.Join(payload, "bin", "x86"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, executable := range []string{filepath.Join(root, "01-Install-ExcelBomb.exe"), filepath.Join(payload, "bin", "x86", "ExcelBomb.exe")} {
+		if got := installPayloadRoot(executable); got != payload {
+			t.Fatalf("%s: got %s", executable, got)
+		}
+	}
+	legacy := t.TempDir()
+	if got := installPayloadRoot(filepath.Join(legacy, "Install-ExcelBomb.exe")); got != legacy {
+		t.Fatal("legacy layout rejected", got)
+	}
+	for _, name := range []string{"01-Install-ExcelBomb.exe", "01-INSTALL-EXCELBOMB.EXE", "Install-ExcelBomb.exe"} {
+		if !isInstallerExecutable(filepath.Join(root, name)) {
+			t.Fatal("installer entry not recognized", name)
+		}
+	}
+	if isInstallerExecutable(filepath.Join(payload, "bin", "x86", "ExcelBomb.exe")) {
+		t.Fatal("portable app mistaken for installer")
+	}
+	if _, err := selectedExecutable(installPayloadRoot(filepath.Join(root, installerFilename)), false); err == nil {
+		t.Fatal("organized package missing the actual binary was accepted")
+	}
+}
+
 func TestInstallerArchitectureSelection(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "中文 安装 & 路径")
 	for _, arch := range []string{"x86", "x64"} {

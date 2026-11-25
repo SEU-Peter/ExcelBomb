@@ -2,7 +2,7 @@
 
 一个只在本机运行的 Excel 工作台，用可视化操作完成拆表、合表和 Lookup。无需安装 Office，支持读取 `.xlsx`、`.xls`、`.csv`，统一导出 `.xlsx`。
 
-**[下载最新版本](https://github.com/SEU-Peter/ExcekBomb/releases/latest)** · [v1.1.1 发布说明](docs/releases/v1.1.1.md) · [开发与测试说明](DEVELOPMENT.md)
+**[下载最新版本](https://github.com/SEU-Peter/ExcekBomb/releases/latest)** · [v1.1.2 发布说明](docs/releases/v1.1.2.md) · [开发与测试说明](DEVELOPMENT.md)
 
 本项目的 GitHub 仓库名为 **ExcekBomb**，软件名称为 **ExcelBomb**。GitHub 用于源码管理与安装包分发；软件仅在本地运行，不提供在线处理网站。选择的表格在浏览器内处理，不上传到服务器，原文件不会被修改。
 
@@ -14,11 +14,11 @@
 
 | 系统 | 下载文件 | 启动方式 |
 | --- | --- | --- |
-| macOS | `ExcelBomb-macOS-1.1.1.zip` | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
-| Windows 7 32 位 | `ExcelBomb-Win7-x86-1.1.1.zip` | 双击 `Install-ExcelBomb.exe` 一键安装并开启登录自启；也可用 `Start-ExcelBomb.cmd` 免安装运行。 |
-| Windows 7 32/64 位通用 | `ExcelBomb-Win7-1.1.1.zip` | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
+| macOS | `ExcelBomb-macOS-1.1.2.zip` | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
+| Windows 7 32 位 | `ExcelBomb-Win7-x86-1.1.2.zip` | 完整解压后双击顶层唯一的 `01-Install-ExcelBomb.exe`。`00-Start-Here.html` 提供中文图文安装指引。 |
+| Windows 7 32/64 位通用 | `ExcelBomb-Win7-1.1.2.zip` | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
 
-启动器打开 `http://127.0.0.1:8769/`，服务只监听本机。所有脚本、字体和处理库均随包附带，使用时无需联网。两个平台都附带虚构测试表格，可先用 `test/` 体验功能。
+启动器打开 `http://127.0.0.1:8769/`，服务只监听本机。所有脚本、字体和处理库均随包附带，使用时无需联网。两个平台都附带虚构测试表格，Mac 位于 `test/`，Win7 位于 `Support/test/`。
 
 **macOS：** 使用当前版本的 Safari、Chrome、Edge 或 Firefox。发行包是本地网页与启动脚本的组合，不是经过签名的 `.app` 安装器。没有 Python 3 时，直接打开随包的离线 HTML 即可。关闭页面不会停止通过启动器开启的本地服务。
 
@@ -26,7 +26,20 @@
 
 ### Win7 一键安装与开机自启
 
-完整解压 ZIP 后，双击 **`Install-ExcelBomb.exe`**。程序安装到当前用户的 `%LOCALAPPDATA%\ExcelBomb`，创建桌面 **ExcelBomb** 快捷方式，并默认开启当前用户登录 Windows 后的后台自启；不自动弹出网页。使用时双击桌面入口即可，无需保留原解压文件夹。安装只写当前用户目录和注册表，无需管理员权限。
+解压后的顶层只有三个入口：
+
+```text
+ExcelBomb-Win7/
+├── 00-Start-Here.html          中文图文安装说明
+├── 01-Install-ExcelBomb.exe    双击这个安装
+└── Support/                   辅助文件，正常安装不用打开
+```
+
+![Win7 中文安装指引](docs/images/installer-guide.png)
+
+完整解压 ZIP 后，双击 **`01-Install-ExcelBomb.exe`**。程序安装到当前用户的 `%LOCALAPPDATA%\ExcelBomb`，创建桌面 **ExcelBomb** 快捷方式，并默认开启当前用户登录 Windows 后的后台自启；不自动弹出网页。使用时双击桌面入口即可，无需保留原解压文件夹。安装只写当前用户目录和注册表，无需管理员权限。
+
+免安装启动、关闭自启、卸载和诊断入口统一收在 `Support/`，安装后也可在安装目录找到这些管理入口。
 
 - 安装器本身为原生 **x86 / PE32**，兼容 Win7 32 位。通用包在 64 位系统中安装 x64 程序；x86 专用包始终安装 32 位程序。
 - `Disable-Autostart.cmd`：关闭登录自启，不停止当前服务。

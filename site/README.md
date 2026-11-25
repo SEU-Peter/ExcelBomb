@@ -38,6 +38,8 @@ Win7 版本由 `win7/build.mjs` 从现有功能代码生成，使用 ES5、IE11 
 
 Win7 1.1.1 增加原生 x86 一键安装器：安装到当前用户目录、创建桌面入口、默认登录后后台自启，并提供关闭自启和卸载入口。使用包分为 x86 专用与 32/64 位通用，清单明确 `asInvoker`，无需管理员权限或脚本运行库。完整操作、原生 API 和构建说明见根目录 README 与 DEVELOPMENT.md。自启注册表和 Shell 快捷方式仍需真实 Windows 机器验收。
 
+Win7 1.1.2 将顶层整理为中文图文说明 `00-Start-Here.html`、唯一安装程序 `01-Install-ExcelBomb.exe` 与 `Support/` 辅助文件夹。完整解压后，直接双击顶层安装程序即可；其他管理脚本和测试数据统一放入 Support。
+
 `EXCELBOMB_LEGACY_PROFILE=1` 可对同一套浏览器测试启用接口缺失模拟；`win7/adapters.test.mjs` 检查 IE 保存、弹窗、无线程及线程失败恢复等路径。这些是在现代浏览器内执行的适配测试，不能替代真实 Win7/IE11 验证。
 
 ## 第三方资源

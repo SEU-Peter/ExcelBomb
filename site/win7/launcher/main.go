@@ -30,7 +30,7 @@ import (
 var embedded embed.FS
 
 const identity = "ExcelBomb-Win7"
-const version = "1.1.1-win7"
+const version = "1.1.2-win7"
 
 type application struct {
 	assets fs.FS
@@ -233,7 +233,7 @@ func run(args []string) error {
 	if !validAddress(*addr) {
 		return errors.New("只允许使用 127.0.0.1 本机地址和有效端口。")
 	}
-	if *install || strings.EqualFold(filepath.Base(os.Args[0]), "Install-ExcelBomb.exe") {
+	if *install || isInstallerExecutable(os.Args[0]) {
 		return installForUser()
 	}
 	if *enable || *disable || *uninstall {
