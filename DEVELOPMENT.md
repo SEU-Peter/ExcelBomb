@@ -61,7 +61,7 @@ node tests/browser.test.mjs
 python3 scripts/package-macos.py
 ```
 
-脚本先同步离线 HTML，再打包启动脚本、本地服务、全部网页资源、离线 HTML、虚构测试表格和中文说明，保留 `.command` 执行权限。输出 `releases/ExcelBomb-macOS-1.1.2.zip` 及对应 `.sha256`；使用包不含 Node/Python 运行时。
+脚本先同步离线 HTML，再打包启动脚本、本地服务、全部网页资源、离线 HTML、虚构测试表格和中文说明，保留 `.command` 执行权限。输出 `releases/ExcelBomb-macOS-1.1.3.zip` 及对应 `.sha256`；使用包不含 Node/Python 运行时。
 
 ## Win7 使用包
 
@@ -75,9 +75,9 @@ node package.mjs /绝对路径/go1.20.14/bin/go
 
 脚本生成 ES5 网页并检查语法，关闭 CGO，分别交叉构建 x86（softfloat）和 x64 启动器，核对 PE 架构、Windows GUI 6.1 子系统及静态导入。通过 `tools/go.mod` 与 `go.sum` 固定的 rsrc v0.10.2 生成两种架构的资源文件，内嵌 `asInvoker` 清单，避免 32 位安装器被 Windows 安装器识别机制要求提权。首次构建需联网取得锁定的开发依赖，目标电脑安装/使用无需联网。
 
-输出 `releases/ExcelBomb-Win7-1.1.2.zip`（32/64 位通用）、`ExcelBomb-Win7-x86-1.1.2.zip`（32 位专用）、对应 `.sha256` 和解压目录，附构建检查信息、第三方许可证与测试数据。两个包的 `01-Install-ExcelBomb.exe` 均为 x86，安装时用 Windows 原生 API 判断系统位数；不以环境变量判断安装架构。
+输出 `releases/ExcelBomb-Win7-1.1.3.zip`（32/64 位通用）、`ExcelBomb-Win7-x86-1.1.3.zip`（32 位专用）、对应 `.sha256` 和解压目录，附构建检查信息、第三方许可证与测试数据。两个包的 `01-Install-ExcelBomb.exe` 均为 x86，安装时用 Windows 原生 API 判断系统位数；不以环境变量判断安装架构。
 
-Win7 包顶层仅保留 `00-Start-Here.html`、`01-Install-ExcelBomb.exe` 和 `Support/`。图文指引从 `win7/install-guide.html` 复制，不含脚本、远程资源或浏览器内执行程序的安装链接。源程序、辅助脚本、测试表格、许可证及构建信息均在 `Support/`；安装器通过 `installPayloadRoot` 查找资源，也兼容旧版平铺目录与从 bin 直接执行 `--install`。ZIP 内使用 ASCII 文件名，脚本保持 ASCII/CRLF，中文文本保留 UTF-8 BOM。版本化解压产物位于 `releases/ExcelBomb-Win7-1.1.2/`，避免与旧版产物混合。
+Win7 包顶层仅保留 `00-Start-Here.html`、`01-Install-ExcelBomb.exe` 和 `Support/`。图文指引从 `win7/install-guide.html` 复制，不含脚本、远程资源或浏览器内执行程序的安装链接。源程序、辅助脚本、测试表格、许可证及构建信息均在 `Support/`；安装器通过 `installPayloadRoot` 查找资源，也兼容旧版平铺目录与从 bin 直接执行 `--install`。ZIP 内使用 ASCII 文件名，脚本保持 ASCII/CRLF，中文文本保留 UTF-8 BOM。版本化解压产物位于 `releases/ExcelBomb-Win7-1.1.3/`，避免与旧版产物混合。
 
 安装逻辑位于 `launcher/install*.go`：通过 SHGetFolderPathW 取得当前用户目录，用 Windows Shell COM 创建桌面快捷方式，在 HKCU Run 写入带引号的安装路径和 `--autostart`，并注册当前用户卸载入口。登录自启只启动本地服务、不打开浏览器，失败写本机日志。管理入口只操作已确认的 ExcelBomb 安装记录；升级可验证旧版服务的身份和会话令牌后关闭自身服务。Windows 原生注册表和 Shell COM 在 macOS 上不能实际执行，交叉构建与逻辑测试不得写成安装真机验证。
 
@@ -102,4 +102,6 @@ CGO_ENABLED=0 /绝对路径/go1.20.14/bin/go test ./...
 
 ## 发布
 
-保持两平台版本一致，核对各 ZIP、许可证、测试文件和 SHA-256，按 [发布说明](docs/releases/v1.1.2.md) 更新说明。将平台 ZIP 与 `SHA256SUMS.txt` 上传到同一 Release；不要把 `node_modules`、历史站点配置、运行日志、实际业务数据或凭据提交到仓库。构建产物留在 `releases/`，开发源码通过 Git 管理。
+用户明确要求：仅在收到后续“打包”或“生成 Release”指令时，才生成安装包、打标签和发布 Release。日常优化只运行本地构建与检查；`build:offline` 和 Win7 `build.mjs` 用于本地网页同步，不自动执行两平台打包脚本或发布命令。
+
+保持两平台版本一致，核对各 ZIP、许可证、测试文件和 SHA-256，按 [发布说明](docs/releases/v1.1.3.md) 更新说明。将平台 ZIP 与 `SHA256SUMS.txt` 上传到同一 Release；不要把 `node_modules`、历史站点配置、运行日志、实际业务数据或凭据提交到仓库。构建产物留在 `releases/`，开发源码通过 Git 管理。

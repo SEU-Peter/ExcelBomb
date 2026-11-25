@@ -30,7 +30,7 @@ import (
 var embedded embed.FS
 
 const identity = "ExcelBomb-Win7"
-const version = "1.1.2-win7"
+const version = "1.1.3-win7"
 
 type application struct {
 	assets fs.FS

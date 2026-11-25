@@ -6,26 +6,43 @@ function uniqueHeaders(values) {
   const used = new Set();
   return values.map((value,i) => { const base=display(value).trim() || `未命名列 ${i+1}`;let name=base,n=2;while(used.has(name))name=`${base} (${n++})`;used.add(name);return name; });
 }
+const DATA_LIMITS={rows:200000,columns:1000,cells:5000000};
+function hasCellValue(cell) {
+  if(!cell||cell.t==='z'||cell.t==='e'||cell.v==null)return false;
+  return typeof cell.v!=='string'||cell.v.replace(/\u200b/g,'').trim()!=='';
+}
 function getData(source) {
   if(!source) throw new Error('请先选择文件。');
   const sheet=source.wb.Sheets[source.sheet];
-  if(!sheet?.['!ref']) throw new Error('这张工作表为空，请选择其他工作表。');
-  const range=XLSX.utils.decode_range(sheet['!ref']);
+  if(!sheet) throw new Error('这张工作表为空，请选择其他工作表。');
   const header=Number(source.header);
-  if(!Number.isInteger(header)||header<1||header>range.e.r+1)throw new Error(`表头行应为 1 到 ${range.e.r+1} 之间的整数。`);
-  if(range.e.r-header+1>200000||range.e.c>=1000)throw new Error('当前版本支持每张表最多 20 万行、1000 列，请先缩小文件。');
-  if((range.e.r-header+2)*(range.e.c+1)>5000000)throw new Error('工作表范围过大，超过 500 万个单元格。请分批处理，或删除多余的空白行列。');
-  const matrix=XLSX.utils.sheet_to_json(sheet,{header:1,range:{s:{r:header-1,c:0},e:range.e},defval:'',raw:true,blankrows:true});
-  const width=range.e.c+1;
-  const headers=uniqueHeaders(Array.from({length:width},(_,i)=>matrix[0]?.[i]??''));
-  if(!matrix[0]?.some(v=>display(v).trim()))throw new Error('所选表头行为空，请调整表头所在行。');
+  if(!Number.isInteger(header)||header<1)throw new Error('表头行必须是大于零的整数。');
+  // !ref often includes a million formatted blank rows. Inspect stored values
+  // before allocating arrays; skip empty rows even inside a sparse used range.
+  const usedRows=new Set();let firstColumn=Infinity,lastColumn=-1,lastRow=-1;
+  for(const address of Object.keys(sheet)){
+    if(address[0]==='!'||!hasCellValue(sheet[address])||!/^[A-Z]+[1-9]\d*$/i.test(address))continue;
+    const position=XLSX.utils.decode_cell(address);
+    if(position.r>1048575||position.c>16383)continue;
+    lastRow=Math.max(lastRow,position.r);
+    if(position.r<header-1)continue;
+    usedRows.add(position.r);firstColumn=Math.min(firstColumn,position.c);lastColumn=Math.max(lastColumn,position.c);
+  }
+  if(lastRow<0)throw new Error('这张工作表没有非空数据，请选择其他工作表。');
+  if(header>lastRow+1)throw new Error(`表头行应为 1 到 ${lastRow+1} 之间的整数。`);
+  if(!usedRows.has(header-1))throw new Error('所选表头行为空，请调整表头所在行。');
+  const actualRows=[...usedRows].filter(r=>r>=header).sort((a,b)=>a-b),width=lastColumn-firstColumn+1;
+  if(actualRows.length>DATA_LIMITS.rows||width>DATA_LIMITS.columns)throw new Error(`实际数据为 ${actualRows.length.toLocaleString()} 行、${width} 列，超过当前容量（${DATA_LIMITS.rows.toLocaleString()} 行、${DATA_LIMITS.columns} 列）。空白区域已自动忽略，请分批处理实际数据。`);
+  if((actualRows.length+1)*width>DATA_LIMITS.cells)throw new Error(`实际非空行的数据区域超过 ${DATA_LIMITS.cells.toLocaleString()} 个单元格。空白区域已自动忽略，请将实际数据分批处理。`);
+  // Let SheetJS normalize cached values (especially dates/timezones), while
+  // restricting conversion to one real row instead of the advertised !ref.
+  const readRow=r=>{const values=XLSX.utils.sheet_to_json(sheet,{header:1,range:{s:{r,c:firstColumn},e:{r,c:lastColumn}},defval:'',raw:true,blankrows:true})[0]||[];return Array.from({length:width},(_,i)=>values[i]??'');};
+  const headers=uniqueHeaders(readRow(header-1));
   const rows=[],formats=[],rowNumbers=[];let protectedIdentifiers=0;
-  matrix.slice(1).forEach((r,offset)=>{
-    if(!r.some(v=>v!==''&&v!=null))return;
-    const excelRow=header+offset;
-    const row=Array.from({length:width},(_,i)=>r[i]??'');
+  actualRows.forEach(excelRow=>{
+    const row=readRow(excelRow);
     const rowFormats=Array.from({length:width},(_,i)=>{
-      const cell=sheet[XLSX.utils.encode_cell({r:excelRow,c:i})];
+      const cell=sheet[XLSX.utils.encode_cell({r:excelRow,c:firstColumn+i})];
       if(cell?.t==='n'&&Number.isInteger(cell.v)&&/^0{2,}(?:[- /]?0+)*$/.test(cell.z||'')){
         protectedIdentifiers++;
         if(source.preserveIdentifiers!==false){row[i]=XLSX.utils.format_cell(cell);return '@';}
