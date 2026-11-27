@@ -2,20 +2,28 @@
 
 一个只在本机运行的 Excel 工作台，用可视化操作完成拆表、合表和 Lookup。无需安装 Office，支持读取 `.xlsx`、`.xls`、`.csv`，统一导出 `.xlsx`。
 
-**[下载最新版本](https://github.com/SEU-Peter/ExcekBomb/releases/latest)** · [v1.1.3 发布说明](docs/releases/v1.1.3.md) · [开发与测试说明](DEVELOPMENT.md)
+**[下载最新 Win7 版](https://github.com/SEU-Peter/ExcekBomb/releases/latest)** · [v1.1.4 发布说明](docs/releases/v1.1.4.md) · [开发与测试说明](DEVELOPMENT.md)
 
 本项目的 GitHub 仓库名为 **ExcekBomb**，软件名称为 **ExcelBomb**。GitHub 用于源码管理与安装包分发；软件仅在本地运行，不提供在线处理网站。选择的表格在浏览器内处理，不上传到服务器，原文件不会被修改。
 
 ![ExcelBomb 拆表预览](docs/images/split.png)
 
-## 当前版本：v1.1.3
+## 当前版本：Win7 v1.1.4 / macOS v1.1.3
+
+本次仅发布 Win7 安装包，macOS 使用包保留 v1.1.3；仓库本地网页和离线文件也已同步合表修复。
+
+- **合表自动整理：** 自动识别表头，清理重复分页表头、页码、打印时间和制表签字等结构行及原表合计 / 小计。
+- **确认后重新汇总：** 对可确认求和的列重算一行总合计，不相加编号、日期、单价和比例；内容相同的业务记录仍保留。可查看清理明细，或选择只保留明细、关闭清理。
+- **异常空日期兼容：** 修复可复现的 `.match` 读取和导出错误，兼容异常空日期单元格，原文件保持不变。
+
+以下 v1.1.3 的改进继续保留：
 
 - **有效数据识别：** 自动忽略多余空行、外围空列及纯格式区域，避免普通表格因工作表声明范围过大而无法处理。已用 40 列 × 685 行、685 列 × 40 行及声明范围覆盖整张工作表的模拟文件验证。
 - **全宽预览：** 文件设置放在上方，数据表格使用下方完整宽度，支持展开核对；默认每页 100 行，可选到 500 行。
 - **全部分组展示：** 拆分结果以多列清单连续显示，不再分页，保留搜索、改名、合并和撤销。
 - **表头提取布局：** “提取表头”按钮紧随文件、工作表与表头行设置；提取完成后显示字段和数据预览。
 
-完整变更见 [v1.1.3 发布说明](docs/releases/v1.1.3.md)。
+完整变更见 [v1.1.4 发布说明](docs/releases/v1.1.4.md)和 [v1.1.3 发布说明](docs/releases/v1.1.3.md)。下方合表说明对应 v1.1.4 Win7 包与最新本地源码，macOS v1.1.3 旧包不含本次合表修复。
 
 ## 下载与启动
 
@@ -24,8 +32,8 @@
 | 系统 | 下载文件 | 启动方式 |
 | --- | --- | --- |
 | macOS | [下载 Mac 版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.3/ExcelBomb-macOS-1.1.3.zip) | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
-| Windows 7 32 位 | [下载 Win7 x86 版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.3/ExcelBomb-Win7-x86-1.1.3.zip) | 完整解压后双击顶层唯一的 `01-Install-ExcelBomb.exe`。`00-Start-Here.html` 提供中文图文安装指引。 |
-| Windows 7 32/64 位通用 | [下载 Win7 通用版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.3/ExcelBomb-Win7-1.1.3.zip) | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
+| Windows 7 32 位 | [下载 Win7 x86 版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.4/ExcelBomb-Win7-x86-1.1.4.zip) | 完整解压后双击顶层唯一的 `01-Install-ExcelBomb.exe`。`00-Start-Here.html` 提供中文图文安装指引。 |
+| Windows 7 32/64 位通用 | [下载 Win7 通用版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.4/ExcelBomb-Win7-1.1.4.zip) | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
 
 仓库为私有开发仓库，查看源码和下载附件需要登录有访问权限的 GitHub 账号。
 
@@ -71,9 +79,10 @@ ExcelBomb-Win7/
 
 ### 合表
 
-1. 选择多份文件，为每个文件指定工作表和表头行。
-2. 拖动调整顺序，也可点击上下按钮。
-3. 预览结果后导出。列按表头名称对齐，缺失字段留空。
+1. 选择多份文件，默认自动识别表头；有多张工作表时选择需要的一张，也可手动指定表头行。实际合并单元格构成的多级表头会整理为一行字段。
+2. 拖动调整顺序，也可点击上下按钮。默认清理重复表头、页码、打印时间、制表签字等结构行及原表合计 / 小计。
+3. 点击 **合并并预览**，列按名称对齐（忽略表头空格、换行和大小写），缺失字段留空。只有原统计与明细求和吻合，或原统计使用 SUM / 求和型 SUBTOTAL 时，才将相应字段重新汇总为一行总合计；编号、日期、单价和比例等不相加。可改为只保留明细，或关闭自动清理按原内容合并。
+4. 核对预览后下载 Excel。页面显示清理数量，可点击 **查看清理明细** 追溯原文件与行号。内容相同的业务记录仍会保留，不会当作重复记录删除。
 
 ### Lookup
 
@@ -98,7 +107,7 @@ ExcelBomb-Win7/
 - 自动识别实际非空行与有效列，跳过空行、纯格式单元格及外围空白列；不使用 Excel 声明范围直接判断容量。内部空白单元格、有效的 0 / false 和原始行号会保留。
 - 数据保存在内存中，刷新或关闭页面后清空；请及时下载结果。
 - 导出保留数据值与数字、日期时间格式，不保留其他原样式、宏、图表和合并单元格。
-- 公式使用输入文件已有的缓存结果，不执行 Excel 公式重算；缺少缓存的公式结果可能为空。
+- 公式通常使用输入文件已有的缓存结果，不执行通用 Excel 公式重算；缺少缓存的公式结果可能为空。合表可根据明细重新汇总已确认的 SUM / 求和型 SUBTOTAL 统计列。
 - 旧编码 CSV 出现乱码时，可先在 Excel 中另存为 XLSX。
 - 后台线程不可用时，Win7 版自动切换兼容处理路径；较大文件可能短暂停顿。
 - Release 附件提供 `SHA256SUMS.txt` 校验文件；用 macOS 的 `shasum -a 256` 或 Windows 的 `certutil -hashfile 文件名 SHA256` 可核对下载内容。

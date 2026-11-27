@@ -30,7 +30,7 @@ app=app.replace('class="guide-grid" style="--guide-columns:${headers.length}"','
 app=app.replaceAll('file.size>30*1024*1024','file.size>10*1024*1024').replaceAll('不能超过 30 MB','不能超过 10 MB').replaceAll('≤ 30 MB','≤ 10 MB').replaceAll('单文件最多 30 MB，每张输入表最多 20 万条实际数据、1000 列，实际数据区域最多 500 万个单元格','单文件最多 10 MB，同时加载总计不超过 20 MB；每张输入表最多 5 万条实际数据、1000 列，实际数据区域最多 50 万个单元格，单次 ZIP 最多 500 个文件');
 app=app.replace("可双击文件夹中的“启动 ExcelBomb.command”打开本地工作台。","可双击 Start-ExcelBomb.cmd 打开 Win7 本地版。IE11 直接打开 HTML 时可能使用主线程兼容模式，较大文件建议通过本地启动入口处理。");
 app=app.replace("async function readFiles(files,target,confirmed=false){",`async function readFiles(files,target,confirmed=false){const previous=target==='merge'?null:findSource(target);const held=[state.split.source,...state.merge.files,state.lookup.main,state.lookup.ref].filter(source=>source&&source!==previous).reduce((sum,source)=>sum+(source.fileSize||0),0);if(held+files.reduce((sum,file)=>sum+file.size,0)>20*1024*1024)throw new Error('Win7 兼容版同时加载的文件总计不能超过 20 MB。请先下载结果，再刷新页面释放内存。');`);
-app=app.replace("const loaded=await request('read',{files:inputs},inputs.map(f=>f.buffer));","const loaded=await request('read',{files:inputs},inputs.map(f=>f.buffer));loaded.forEach((source,i)=>source.fileSize=files[i].size);");
+app=app.replace("const loaded=await request('read',{files:inputs,merge:target==='merge'},inputs.map(f=>f.buffer));","const loaded=await request('read',{files:inputs,merge:target==='merge'},inputs.map(f=>f.buffer));loaded.forEach((source,i)=>source.fileSize=files[i].size);");
 app=app.replace("后台处理中，可继续查看使用说明","处理中，请保持页面打开");
 const legacyMain=compile(`(function(){\n${core}\n${app}\n})();`,'application');
 const engine=compile(`window.ExcelBombLegacyEngine=function(self){\n${core}\n${runtime}\n};`,'fallback engine');

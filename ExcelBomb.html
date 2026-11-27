@@ -48,6 +48,7 @@ main,.header-inner{max-width:1800px}.workspace{overflow:visible}.work-grid{grid-
 
 .setup-block .chips{max-height:190px;overflow:auto;padding:2px 3px 4px}.data-preview table{font-size:14px}
 .split-config.awaiting-header{border-bottom:0}.split-config.awaiting-header .setup-block{display:flex;align-items:center;justify-content:center}.split-config.awaiting-header .empty-preview{width:100%;max-width:480px}.split-config.awaiting-header .source-block>.button{margin-top:18px}
+.merge-clean-options{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}.merge-clean-options>label:not(.check-option){display:block;font-size:13px;color:#506b59;margin:14px 0 7px}.merge-clean-options .check-option{font-size:14px}.merge-auto-header{margin-top:8px;flex-wrap:wrap;font-size:13px}.merge-summary{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:14px 16px;margin-bottom:18px;border:1px solid #d8e8dc;border-radius:9px;background:#f0f7f1}.merge-summary strong{font-size:15px;color:#2c6c45}.merge-summary p{font-size:12px;margin:4px 0 0;color:#688270}.merge-summary .text-button{flex-shrink:0}@media(max-width:600px){.merge-summary{align-items:flex-start;flex-direction:column;gap:8px}}
 
 </style></head>
 <body>
@@ -107,6 +108,16 @@ function uniqueHeaders(values) {
   return values.map((value,i) => { const base=display(value).trim() || `未命名列 ${i+1}`;let name=base,n=2;while(used.has(name))name=`${base} (${n++})`;used.add(name);return name; });
 }
 const DATA_LIMITS={rows:200000,columns:1000,cells:5000000};
+function cleanValue(value,fallback='') {
+  if(value==null)return '';
+  if(Object.prototype.toString.call(value)==='[object Date]')return Number.isFinite(value.getTime())?value:fallback;
+  if(typeof value==='number')return Number.isFinite(value)?value:fallback;
+  if(typeof value==='string'||typeof value==='boolean')return value;
+  // Never pass cell-like objects with a null date to the XLSX writer.
+  if(typeof value==='object'&&Object.prototype.hasOwnProperty.call(value,'v'))return value.v==null?'':typeof value.v==='object'?fallback:cleanValue(value.v,fallback);
+  return display(value);
+}
+function cleanFormat(format){return typeof format==='string'?format:typeof format==='number'?XLSX.SSF?._table?.[format]||'':'';}
 function hasCellValue(cell) {
   if(!cell||cell.t==='z'||cell.t==='e'||cell.v==null)return false;
   return typeof cell.v!=='string'||cell.v.replace(/\u200b/g,'').trim()!=='';
@@ -134,9 +145,10 @@ function getData(source) {
   const actualRows=[...usedRows].filter(r=>r>=header).sort((a,b)=>a-b),width=lastColumn-firstColumn+1;
   if(actualRows.length>DATA_LIMITS.rows||width>DATA_LIMITS.columns)throw new Error(`实际数据为 ${actualRows.length.toLocaleString()} 行、${width} 列，超过当前容量（${DATA_LIMITS.rows.toLocaleString()} 行、${DATA_LIMITS.columns} 列）。空白区域已自动忽略，请分批处理实际数据。`);
   if((actualRows.length+1)*width>DATA_LIMITS.cells)throw new Error(`实际非空行的数据区域超过 ${DATA_LIMITS.cells.toLocaleString()} 个单元格。空白区域已自动忽略，请将实际数据分批处理。`);
+  if(typeof sheet['!ref']!=='string'||!sheet['!ref'])sheet['!ref']=XLSX.utils.encode_range({s:{r:header-1,c:firstColumn},e:{r:lastRow,c:lastColumn}});
   // Let SheetJS normalize cached values (especially dates/timezones), while
   // restricting conversion to one real row instead of the advertised !ref.
-  const readRow=r=>{const values=XLSX.utils.sheet_to_json(sheet,{header:1,range:{s:{r,c:firstColumn},e:{r,c:lastColumn}},defval:'',raw:true,blankrows:true})[0]||[];return Array.from({length:width},(_,i)=>values[i]??'');};
+  const readRow=r=>{const values=XLSX.utils.sheet_to_json(sheet,{header:1,range:{s:{r,c:firstColumn},e:{r,c:lastColumn}},defval:'',raw:true,blankrows:true})[0]||[];return Array.from({length:width},(_,i)=>{const cell=sheet[XLSX.utils.encode_cell({r,c:firstColumn+i})];return cleanValue(values[i],typeof cell?.w==='string'?cell.w:'');});};
   const headers=uniqueHeaders(readRow(header-1));
   const rows=[],formats=[],rowNumbers=[];let protectedIdentifiers=0;
   actualRows.forEach(excelRow=>{
@@ -145,13 +157,13 @@ function getData(source) {
       const cell=sheet[XLSX.utils.encode_cell({r:excelRow,c:firstColumn+i})];
       if(cell?.t==='n'&&Number.isInteger(cell.v)&&/^0{2,}(?:[- /]?0+)*$/.test(cell.z||'')){
         protectedIdentifiers++;
-        if(source.preserveIdentifiers!==false){row[i]=XLSX.utils.format_cell(cell);return '@';}
+        if(source.preserveIdentifiers!==false){row[i]=XLSX.utils.format_cell({...cell,w:undefined});return '@';}
       }
-      return cell?.z||'';
+      return cleanFormat(cell?.z);
     });
     rows.push(row);formats.push(rowFormats);rowNumbers.push(excelRow+1);
   });
-  return {headers,rows,formats,rowNumbers,protectedIdentifiers};
+  return {headers,rows,formats,rowNumbers,protectedIdentifiers,headerRow:header,firstColumn};
 }
 function splitData(data,column) {
   const map=new Map();
@@ -166,14 +178,145 @@ function mergeGroups(groups,ids,name) {
   for(const g of groups){if(selected.has(g.id)){if(!inserted){result.push(combined);inserted=true;}}else result.push(g);}
   return result;
 }
-function mergeTables(tables) {
-  if(tables.length<2)throw new Error('请至少添加两个文件。');
-  const headers=[...new Set(tables.flatMap(t=>t.headers))];
+function headerKey(value){return display(value).replace(/[！-～]/g,c=>String.fromCharCode(c.charCodeAt(0)-65248)).replace(/[\s\u200b\ufeff]+/g,'').replace(/[:：]+$/,'').toLocaleLowerCase();}
+function rowKey(row){return JSON.stringify(row.map(headerKey));}
+const fieldLabel=/^(序号|编号|编码|代码|id|姓名|名称|人员|单位|部门|岗位|职务|日期|时间|金额|数量|单价|合价|总价|规格|型号|产品|商品|项目|地址|电话|手机|邮箱|备注|说明|城市|渠道|工时|补贴|人数|年龄|性别|.*(?:编号|编码|名称|日期|时间|金额|数量|姓名|电话|单位|部门)(?:[（(].*[)）])?)$/i;
+function worksheetRows(sheet){
+  const rows=new Map();
+  for(const address of Object.keys(sheet||{})){
+    const cell=sheet[address];if(address[0]==='!'||!hasCellValue(cell)||!/^[A-Z]+[1-9]\d*$/i.test(address))continue;
+    const {r,c}=XLSX.utils.decode_cell(address);if(r<0||r>1048575||c<0||c>16383)continue;
+    if(!rows.has(r))rows.set(r,new Map());rows.get(r).set(c,cell);
+  }
+  return [...rows].sort((a,b)=>a[0]-b[0]);
+}
+function findMergeHeader(source,rawRows){
+  const sheet=source.wb.Sheets[source.sheet];let header=Number(source.header)||1;
+  if(source.autoHeader!==false){
+    let best=-Infinity;
+    for(const [r,cells] of rawRows.slice(0,80)){
+      const values=[...cells.values()].map(cell=>cleanValue(cell.v)),strings=values.filter(v=>typeof v==='string'),known=strings.filter(v=>fieldLabel.test(headerKey(v))).length;
+      const score=values.length*3+known*8+strings.length/values.length*4-(values.length-strings.length)*5-strings.filter(v=>v.length>45).length*4;
+      if(score>best){best=score;header=r+1;}
+    }
+  }
+  let start=header-1,end=start;const merges=Array.isArray(sheet?.['!merges'])?sheet['!merges']:[];
+  // Fold real merged header levels into a single output field row.
+  for(let n=0;n<2;n++){
+    const above=rawRows.find(([r])=>r===start-1);
+    if(!above||above[1].size<2||!merges.some(m=>m.s.r===start-1&&(m.e.c>m.s.c||m.e.r>=start)))break;
+    start--;
+  }
+  for(let n=0;n<2;n++){
+    const below=rawRows.find(([r])=>r===end+1);
+    if(!below||!merges.some(m=>m.s.r<=end&&m.e.r>=end&&m.e.c>m.s.c))break;
+    const values=[...below[1].values()].map(c=>cleanValue(c.v));
+    if(values.filter(v=>typeof v==='string'&&fieldLabel.test(headerKey(v))).length<2)break;
+    end++;
+  }
+  return {header:start+1,depth:end-start+1};
+}
+function detectMergeHeader(source){return findMergeHeader(source,worksheetRows(source.wb.Sheets[source.sheet]));}
+function getMergeData(source){
+  const sheet=source.wb.Sheets[source.sheet],rawRows=worksheetRows(sheet),found=findMergeHeader(source,rawRows);
+  const data=getData({...source,header:found.header}),width=data.headers.length,first=data.firstColumn,merges=Array.isArray(sheet['!merges'])?sheet['!merges']:[];
+  const rawVector=r=>Array.from({length:width},(_,j)=>cleanValue(sheet[XLSX.utils.encode_cell({r,c:first+j})]?.v));
+  const labelAt=(r,c)=>{let cell=sheet[XLSX.utils.encode_cell({r,c})];if(!hasCellValue(cell)){const m=merges.find(m=>m.s.r<=r&&m.e.r>=r&&m.s.c<=c&&m.e.c>=c);if(m)cell=sheet[XLSX.utils.encode_cell(m.s)];}return display(cleanValue(cell?.v)).trim();};
+  const levels=Array.from({length:width},(_,j)=>Array.from({length:found.depth},(_,i)=>labelAt(found.header-1+i,first+j)).filter((v,i,a)=>v&&a.indexOf(v)===i));
+  const leaves=levels.map(a=>a[a.length-1]||''),counts=new Map();leaves.forEach(v=>counts.set(headerKey(v),(counts.get(headerKey(v))||0)+1));
+  data.headers=uniqueHeaders(levels.map((a,i)=>counts.get(headerKey(leaves[i]))>1?a.join(' / '):leaves[i]));
+  const indices=data.rowNumbers.map((r,i)=>({r,i})).filter(({r})=>r>=found.header+found.depth);
+  const rows=indices.map(({i})=>data.rows[i]),formats=indices.map(({i})=>data.formats[i]),rowNumbers=indices.map(({r})=>r);
+  const formulas={};indices.forEach(({r},i)=>{if(summaryLabel(rows[i],data.headers))formulas[i]=Array.from({length:width},(_,j)=>{const value=sheet[XLSX.utils.encode_cell({r:r-1,c:first+j})]?.f;return typeof value==='string'?value:'';});});
+  return {...data,rows,formats,rowNumbers,repairedDates:source.repairedDates||0,sourceName:source.name||source.sheet,mergeContext:{header:found.header,depth:found.depth,headers:Array.from({length:found.depth},(_,i)=>rawVector(found.header-1+i)),prefix:rawRows.filter(([r])=>r<found.header-1).map(([r])=>rawVector(r)),formulas}};
+}
+function summaryLabel(row,headers=[]){
+  if(!Array.isArray(row))return null;
+  const index=row.findIndex(v=>/^(?:(?:本页|本表|本期|本月|本次|本组|部门|分项|分类|全表|全部))?(?:小计|合计|共计|总计|累计|汇总|总合计|总额|总数)(?:[（(].*[)）])?$/.test(headerKey(v)));if(index<0)return null;
+  if(row.some((v,c)=>c!==index&&headerKey(v)&&/序号|编号|编码|代码|身份证|账号|^id$/i.test(headerKey(headers[c]))))return null;
+  const first=row.findIndex(v=>headerKey(v)!=='');
+  if(first!==index&&row.some((v,c)=>c!==index&&headerKey(v)&&numericValue(v)===null))return null;
+  return {index,label:display(row[index])};
+}
+function footerLabel(row,headers=[]){
+  const cells=row.map(v=>display(v).trim()).filter(Boolean);if(!cells.length)return false;
+  const firstIndex=row.findIndex(v=>headerKey(v));
+  if(row.some((v,c)=>c!==firstIndex&&headerKey(v)&&/序号|编号|编码|代码|身份证|账号|^id$/i.test(headerKey(headers[c]))))return false;
+  const joined=cells.join(' '),first=cells[0];
+  if(/^(?:第\s*\d+\s*页|页(?:码|次)\s*[:：]|共\s*\d+\s*页)/.test(first)||/^(?:本页)?共(?:计)?\s*\d+\s*(?:条|行|笔|份)(?:记录|数据)?[。.]?$/.test(first)||/^page\s+\d+(?:\s+(?:of|\/)\s+\d+)?$/i.test(joined))return true;
+  return (cells.length<=4||(cells.length<=8&&!row.some(v=>typeof v==='number')))&&/^(?:(?:制表人?|填表人?|填报人?|编制人?|审核人?|复核人?|审批人?|负责人|经办人|统计人|报送单位|制表单位|签字|盖章|打印人|打印时间|打印日期|生成时间|导出时间|制表日期|填报日期|填表日期|报送日期|数据来源)(?:\s*[:：]|$)|(?:备注|附注|注|说明|提示|声明)\s*[:：]|本(?:表|报告).*(?:仅供|供内部|统计口径|数据说明))/.test(first);
+}
+function numericValue(value){
+  if(typeof value==='number')return Number.isFinite(value)?value:null;
+  if(typeof value!=='string')return null;const text=value.trim();
+  if(!/^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text)||/^[+-]?0\d/.test(text))return null;
+  const number=Number(text.replace(/,/g,''));return Number.isFinite(number)?number:null;
+}
+function sumColumn(rows,column){let total=0,correction=0,count=0;for(const row of rows){const number=numericValue(row[column]);if(number===null)continue;const value=number-correction,next=total+value;correction=(next-total)-value;total=next;count++;}return {value:Number(total.toPrecision(15)),count};}
+function maySum(header,formats,column){
+  if(/序号|编号|编码|代码|证件|身份证|电话|手机|邮编|账号|日期|时间|单价|均价|平均|比例|占比|百分比|税率|利率|增长率|余额|年份|年度|^(?:id|code|phone|date|time)$/i.test(headerKey(header)))return false;
+  return !formats.some(row=>{const f=cleanFormat(row?.[column]);return /%/.test(f)||(f&&XLSX.SSF.is_date(f));});
+}
+function mergeTables(tables,{clean=true,totals='auto'}={}) {
+  if(!Array.isArray(tables)||tables.length<2)throw new Error('请至少添加两个文件。');
+  const headers=[],keys=new Map();
+  const prepared=tables.map((table,index)=>{
+    if(!Array.isArray(table?.headers)||!table.headers.length)throw new Error(`第 ${index+1} 份表格没有可用表头。`);
+    const localHeaders=uniqueHeaders(table.headers),occurrences=new Map(),mapping=localHeaders.map(h=>{const base=headerKey(h),n=(occurrences.get(base)||0)+1;occurrences.set(base,n);const key=n===1?base:`${base}::${n}`;if(!keys.has(key)){keys.set(key,headers.length);headers.push(h);}return keys.get(key);});
+    const entries=[];(Array.isArray(table.rows)?table.rows:[]).forEach((row,i)=>{if(!Array.isArray(row))return;const values=Array.from({length:localHeaders.length},(_,c)=>cleanValue(row[c]));if(!values.some(v=>headerKey(v)))return;entries.push({values,formats:localHeaders.map((_,c)=>cleanFormat(table.formats?.[i]?.[c])),number:table.rowNumbers?.[i]??i+2,original:i});});
+    const headerRows=[localHeaders,...(table.mergeContext?.headers||[])],headerSet=new Set(headerRows.map(rowKey)),prefix=new Set((table.mergeContext?.prefix||[]).map(rowKey));
+    return {table,localHeaders,mapping,entries,headerSet,prefix,name:table.sourceName||`文件 ${index+1}`};
+  });
   if(headers.length>16384)throw new Error('合并结果超过 Excel 单张工作表的列数上限。');
-  const rows=[],formats=[];
-  for(const t of tables){const indices=headers.map(h=>t.headers.indexOf(h));t.rows.forEach((r,row)=>{rows.push(indices.map(i=>i<0?'':r[i]));formats.push(indices.map(i=>i<0?'':t.formats?.[row]?.[i]||''));});}
+  // Repeated free-form tail notes are removable only after the last identifiable
+  // business record. Repeated business rows themselves are never deduplicated.
+  const tailCounts=new Map();
+  for(const p of prepared){
+    const ids=p.localHeaders.map((h,c)=>/序号|编号|编码|代码|身份证|账号|^id$/i.test(headerKey(h))?c:-1).filter(c=>c>=0);p.tailCandidates=new Set();let lastRecord=-1;
+    if(ids.length)for(let i=0;i<p.entries.length;i++){const row=p.entries[i].values;if(p.headerSet.has(rowKey(row))||summaryLabel(row,p.localHeaders)||footerLabel(row,p.localHeaders))continue;if(ids.some(c=>{const value=display(row[c]).trim();return value&&(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)||value.length<=6||row.filter(v=>headerKey(v)).length>=3);}))lastRecord=i;}
+    if(lastRecord>=0)for(let i=lastRecord+1;i<p.entries.length;i++){const values=p.entries[i].values.filter(v=>headerKey(v));if(values.length&&values.length<=3&&values.every(v=>typeof v==='string')){const key=rowKey(p.entries[i].values);p.tailCandidates.add(i);tailCounts.set(key,(tailCounts.get(key)||0)+1);}}
+  }
+  const rows=[],formats=[],removed=[],files=[],sumColumns=new Set();let totalLabel=0;
+  for(const p of prepared){
+    const kept=[],summaries=[];let segmentStart=0;const stats={name:p.name,header:p.table.mergeContext?.header||p.table.headerRow||1,headers:0,footers:0,summaries:0,input:p.entries.length,kept:0};
+    const kinds=p.entries.map(e=>p.headerSet.has(rowKey(e.values))?'header':summaryLabel(e.values,p.localHeaders)?'summary':footerLabel(e.values,p.localHeaders)?'footer':'');
+    for(let i=0;i<p.entries.length;i++){
+      const entry=p.entries[i],summary=summaryLabel(entry.values,p.localHeaders);let kind=clean?kinds[i]:'';
+      if(clean&&!kind&&p.prefix.has(rowKey(entry.values))){for(let j=i+1;j<Math.min(i+9,p.entries.length);j++){if(kinds[j]==='header'){kind='header';break;}if(kinds[j]!=='footer'&&!p.prefix.has(rowKey(p.entries[j].values)))break;}}
+      if(clean&&!kind&&p.tailCandidates.has(i)&&(tailCounts.get(rowKey(entry.values))||0)>1)kind='footer';
+      if(kind){
+        stats[kind==='header'?'headers':kind==='footer'?'footers':'summaries']++;
+        removed.push({p,entry,reason:kind==='header'?'重复表头 / 页眉':kind==='footer'?'页脚 / 说明':'原表合计 / 小计'});
+        if(kind==='summary'){summaries.push({entry,summary,before:kept.length,segmentStart});segmentStart=kept.length;}
+      }else kept.push(entry);
+    }
+    const numericCache=new Map(),formatCache=new Map(),keptFormats=kept.map(e=>e.formats);
+    const prefix=c=>{if(!numericCache.has(c)){const values=[0],counts=[0];let sum=0,correction=0,count=0;for(const entry of kept){const number=numericValue(entry.values[c]);if(number!==null){const v=number-correction,next=sum+v;correction=(next-sum)-v;sum=next;count++;}values.push(sum);counts.push(count);}numericCache.set(c,{values,counts});}return numericCache.get(c);};
+    if(clean&&totals==='auto')for(const record of summaries){
+      totalLabel=p.mapping[record.summary.index];
+      for(let c=0;c<p.localHeaders.length;c++){
+        const formula=p.table.mergeContext?.formulas?.[record.entry.original]?.[c];
+        const explicit=typeof formula==='string'&&/^(?:=?\s*SUM\s*\(|=?\s*SUBTOTAL\s*\(\s*(?:9|109)\s*[,;])/i.test(formula);
+        const expected=numericValue(record.entry.values[c]);if(expected===null&&!explicit)continue;if(!formatCache.has(c))formatCache.set(c,maySum(p.localHeaders[c],keptFormats,c));if(!formatCache.get(c))continue;
+        const sums=prefix(c),all={value:sums.values[record.before],count:sums.counts[record.before]},part={value:sums.values[record.before]-sums.values[record.segmentStart],count:sums.counts[record.before]-sums.counts[record.segmentStart]};
+        const close=sum=>expected!==null&&sum.count>0&&Math.abs(sum.value-expected)<=Math.max(1e-8,Math.abs(expected)*1e-9);
+        if((explicit&&(all.count||part.count))||close(all)||close(part))sumColumns.add(p.mapping[c]);
+      }
+    }
+    for(const entry of kept){const row=Array(headers.length).fill(''),format=Array(headers.length).fill('');p.mapping.forEach((target,c)=>{row[target]=entry.values[c];format[target]=entry.formats[c];});rows.push(row);formats.push(format);}
+    stats.kept=kept.length;files.push(stats);
+  }
+  const dataRows=rows.length;let summaryRowCount=0;
+  if(clean&&totals==='auto'&&sumColumns.size&&dataRows){
+    const summary=Array(headers.length).fill(''),format=Array(headers.length).fill('');
+    if(sumColumns.has(totalLabel))totalLabel=headers.findIndex((_,c)=>!sumColumns.has(c));if(totalLabel<0)totalLabel=0;
+    summary[totalLabel]='合计';for(const column of sumColumns){if(column===totalLabel)continue;summary[column]=sumColumn(rows,column).value;format[column]=formats.find(r=>r[column])?.[column]||'';}
+    rows.push(summary);formats.push(format);summaryRowCount=1;
+  }
   if(rows.length>1048575)throw new Error('合并结果超过 Excel 单张工作表的行数上限。');
-  return {headers,rows,formats};
+  const removedData={headers:uniqueHeaders(['来源文件','原始行号','清理原因',...headers]),rows:[],formats:[]};
+  for(const item of removed){const row=Array(headers.length).fill(''),format=Array(headers.length).fill('');item.p.mapping.forEach((target,c)=>{row[target]=item.entry.values[c];format[target]=item.entry.formats[c];});removedData.rows.push([item.p.name,item.entry.number,item.reason,...row]);removedData.formats.push(['','','',...format]);}
+  return {headers,rows,formats,summaryRowCount,mergeReport:{clean,dataRows,summaryRowCount,repairedDates:prepared.reduce((s,p)=>s+(p.table.repairedDates||0),0),sumColumns:[...sumColumns].map(c=>headers[c]),headersRemoved:files.reduce((s,f)=>s+f.headers,0),footersRemoved:files.reduce((s,f)=>s+f.footers,0),summariesRemoved:files.reduce((s,f)=>s+f.summaries,0),files,removedData}};
 }
 function lookupTables(main,reference,{mainKey,refKey,returns,trim=true,ignoreCase=false,duplicate='first',missing=''}) {
   if(!returns.length)throw new Error('请至少选择一个返回字段。');
@@ -194,9 +337,44 @@ function uniqueFilenames(names){const used=new Set();return names.map(n=>{const 
 function splitFilenames(groups){return uniqueFilenames(groups.map(g=>`${safeFilename(g.name).slice(0,85)}-${g.items.length}`));}
 function groupData(data,group){return {headers:data.headers,rows:group.items.map(x=>x.row),formats:group.items.map(x=>data.formats?.[x.index]||[]),rowNumbers:group.items.map(x=>data.rowNumbers?.[x.index]??x.index+2)};}
 function subsetData(data,indices){return {...data,rows:indices.map(i=>data.rows[i]),formats:indices.map(i=>data.formats?.[i]||[]),rowNumbers:indices.map(i=>data.rowNumbers?.[i]??i+1)};}
-function makeWorkbook(data){const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet([data.headers,...data.rows.map(row=>row.map(value=>value===''?null:value))],{cellDates:true});data.formats?.forEach((r,i)=>r.forEach((format,j)=>{const cell=ws[XLSX.utils.encode_cell({r:i+1,c:j})];if(format&&cell)cell.z=format;}));ws['!cols']=data.headers.map(h=>({wch:Math.max(14,Math.min(display(h).length*2+2,30))}));if(data.rows.length)ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.rows.length,c:data.headers.length-1}})};XLSX.utils.book_append_sheet(wb,ws,'数据');return wb;}
+function makeWorkbook(data){
+  if(!data||!Array.isArray(data.headers)||!data.headers.length)throw new Error('没有可导出的表格字段。');
+  const rows=Array.isArray(data.rows)?data.rows:[],values=rows.map(row=>Array.from({length:data.headers.length},(_,i)=>{const v=cleanValue(Array.isArray(row)?row[i]:null);return v===''?null:v;}));
+  const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([data.headers.map(v=>cleanValue(v)),...values],{cellDates:true});
+  if(Array.isArray(data.formats))data.formats.forEach((row,i)=>{if(!Array.isArray(row))return;row.forEach((format,j)=>{const cell=ws[XLSX.utils.encode_cell({r:i+1,c:j})],safe=cleanFormat(format);if(safe&&cell)cell.z=safe;});});
+  ws['!cols']=data.headers.map(h=>({wch:Math.max(14,Math.min(display(h).length*2+2,30))}));
+  const filteredRows=rows.length-(data.summaryRowCount||0);
+  if(filteredRows>0)ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:filteredRows,c:data.headers.length-1}})};
+  XLSX.utils.book_append_sheet(wb,ws,'数据');return wb;
+}
 
 const sources=new Map();let sourceSerial=0;
+async function readWorkbook(file){
+ const options={type:'array',cellDates:true,cellNF:true,raw:/\.csv$/i.test(file.name)},complete=wb=>wb?.SheetNames?.length&&wb.SheetNames.every(name=>typeof name==='string'&&wb.Sheets?.[name]);
+ let wb;try{wb=XLSX.read(file.buffer,options);}catch{}
+ if(complete(wb))return {wb,repairedDates:0};
+ // Some XLSX generators emit date cells with no cached value. SheetJS can
+ // silently drop that entire worksheet after calling .match on the null date.
+ if(/\.xlsx$/i.test(file.name)){
+  try{
+   const zip=await JSZip.loadAsync(file.buffer);let repairedDates=0;
+   for(const name of Object.keys(zip.files)){
+    if(!/^xl\/worksheets\/[^/]+\.xml$/.test(name))continue;
+    const xml=await zip.file(name).async('string');let changed=false;
+    const fixed=xml.replace(/<c\b[^>]*\bt=(?:"d"|'d')[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,cell=>{
+     const match=cell.match(/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/),value=match?match[1].trim():'';
+     if(value&&Number.isFinite(new Date(value).getTime()))return cell;
+     repairedDates++;changed=true;if(!value||/^(?:null|undefined)$/i.test(value))return '';
+     const start=cell.match(/^<c\b([^>]*?)(?:\/>|>)/),attributes=start?start[1].replace(/\s+t=(?:"d"|'d')/,''):'';
+     return `<c${attributes} t="inlineStr"><is><t>${match[1]}</t></is></c>`;
+    });
+    if(changed)zip.file(name,fixed);
+   }
+   if(repairedDates){wb=XLSX.read(await zip.generateAsync({type:'arraybuffer'}),options);if(complete(wb))return {wb,repairedDates};}
+  }catch{}
+ }
+ throw new Error(`无法完整读取「${file.name}」的工作表，请检查文件是否损坏或已加密；必要时用 Excel / WPS 另存为 XLSX 后重试。`);
+}
 function progress(id,label,percent=null){self.postMessage({id,progress:{label,percent}});}
 function sourceData(meta){const stored=sources.get(meta.id);if(!stored)throw new Error('文件已释放，请重新选择文件。');const key=JSON.stringify([meta.sheet,meta.header,meta.preserveIdentifiers]);if(stored.key!==key){stored.data=getData({...meta,wb:stored.wb});stored.key=key;}return stored.data;}
 function register(wb,name,extra={}){const id=`source-${++sourceSerial}`;sources.set(id,{wb});return {id,name,sheetNames:wb.SheetNames,sheet:wb.SheetNames[0],header:1,preserveIdentifiers:true,...extra};}
@@ -207,16 +385,17 @@ self.onmessage=async({data:{id,kind,payload}})=>{
    const pending=[];
    for(let i=0;i<payload.files.length;i++){
     const f=payload.files[i];progress(id,`读取文件 ${i+1}/${payload.files.length}：${f.name}`);
-    let wb;try{wb=XLSX.read(f.buffer,{type:'array',cellDates:true,cellNF:true,raw:/\.csv$/i.test(f.name)});}catch{throw new Error(`无法读取「${f.name}」，请检查文件是否损坏或已加密。`);}
+    const {wb,repairedDates}=await readWorkbook(f);
     if(!wb.SheetNames.length)throw new Error(`「${f.name}」没有工作表。`);
-    pending.push({wb,name:f.name});progress(id,`已读取 ${i+1}/${payload.files.length} 个文件`,(i+1)/payload.files.length*100);
+    pending.push({wb,name:f.name,repairedDates});progress(id,`已读取 ${i+1}/${payload.files.length} 个文件`,(i+1)/payload.files.length*100);
    }
-   result=pending.map(({wb,name})=>register(wb,name));
+   result=pending.map(({wb,name,repairedDates})=>{const meta=register(wb,name,{repairedDates});if(payload.merge){meta.autoHeader=true;meta.header=detectMergeHeader({...meta,wb}).header;}return meta;});
   }else if(kind==='sample'){
    result=payload.map(f=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([f.headers,...f.rows]),'示例数据');return register(wb,f.name,{demo:true});});
   }else if(kind==='extract'){progress(id,'识别表头与数据');result=sourceData(payload.source);
   }else if(kind==='split'){progress(id,'按字段分组');const data=sourceData(payload.source);result={data,groups:splitData(data,payload.column)};
-  }else if(kind==='merge'){const tables=[];for(let i=0;i<payload.sources.length;i++){progress(id,`整理表格 ${i+1}/${payload.sources.length}`,i/payload.sources.length*80);tables.push(sourceData(payload.sources[i]));}progress(id,'对齐字段并合并数据',85);result=mergeTables(tables);
+  }else if(kind==='merge-header'){const meta=payload.source,stored=sources.get(meta.id);if(!stored)throw new Error('文件已释放，请重新选择文件。');result=detectMergeHeader({...meta,wb:stored.wb});
+  }else if(kind==='merge'){const tables=[];for(let i=0;i<payload.sources.length;i++){const meta=payload.sources[i],stored=sources.get(meta.id);if(!stored)throw new Error('文件已释放，请重新选择文件。');progress(id,`整理表格 ${i+1}/${payload.sources.length}：${meta.name}`,i/payload.sources.length*80);try{tables.push(getMergeData({...meta,wb:stored.wb}));}catch(e){throw new Error(`「${meta.name}」的「${meta.sheet}」处理失败：${e.message}`);}}progress(id,'清理重复结构并对齐字段',85);result=mergeTables(tables,payload.options||{});
   }else if(kind==='lookup'){progress(id,'整理主表和参照表');const main=sourceData(payload.main),ref=sourceData(payload.ref);progress(id,'匹配记录并检查重复值');try{result={main,ref,result:lookupTables(main,ref,payload.options)};}catch(e){if(e.duplicateData)result={main,ref,duplicateData:e.duplicateData,error:e.message};else throw e;}
   }else if(kind==='xlsx'){progress(id,'生成 Excel 文件');result={buffer:XLSX.write(makeWorkbook(payload.data),{type:'array',bookType:'xlsx'})};
   }else if(kind==='zip'){
@@ -281,6 +460,16 @@ function uniqueHeaders(values) {
   return values.map((value,i) => { const base=display(value).trim() || `未命名列 ${i+1}`;let name=base,n=2;while(used.has(name))name=`${base} (${n++})`;used.add(name);return name; });
 }
 const DATA_LIMITS={rows:200000,columns:1000,cells:5000000};
+function cleanValue(value,fallback='') {
+  if(value==null)return '';
+  if(Object.prototype.toString.call(value)==='[object Date]')return Number.isFinite(value.getTime())?value:fallback;
+  if(typeof value==='number')return Number.isFinite(value)?value:fallback;
+  if(typeof value==='string'||typeof value==='boolean')return value;
+  // Never pass cell-like objects with a null date to the XLSX writer.
+  if(typeof value==='object'&&Object.prototype.hasOwnProperty.call(value,'v'))return value.v==null?'':typeof value.v==='object'?fallback:cleanValue(value.v,fallback);
+  return display(value);
+}
+function cleanFormat(format){return typeof format==='string'?format:typeof format==='number'?XLSX.SSF?._table?.[format]||'':'';}
 function hasCellValue(cell) {
   if(!cell||cell.t==='z'||cell.t==='e'||cell.v==null)return false;
   return typeof cell.v!=='string'||cell.v.replace(/\u200b/g,'').trim()!=='';
@@ -308,9 +497,10 @@ function getData(source) {
   const actualRows=[...usedRows].filter(r=>r>=header).sort((a,b)=>a-b),width=lastColumn-firstColumn+1;
   if(actualRows.length>DATA_LIMITS.rows||width>DATA_LIMITS.columns)throw new Error(`实际数据为 ${actualRows.length.toLocaleString()} 行、${width} 列，超过当前容量（${DATA_LIMITS.rows.toLocaleString()} 行、${DATA_LIMITS.columns} 列）。空白区域已自动忽略，请分批处理实际数据。`);
   if((actualRows.length+1)*width>DATA_LIMITS.cells)throw new Error(`实际非空行的数据区域超过 ${DATA_LIMITS.cells.toLocaleString()} 个单元格。空白区域已自动忽略，请将实际数据分批处理。`);
+  if(typeof sheet['!ref']!=='string'||!sheet['!ref'])sheet['!ref']=XLSX.utils.encode_range({s:{r:header-1,c:firstColumn},e:{r:lastRow,c:lastColumn}});
   // Let SheetJS normalize cached values (especially dates/timezones), while
   // restricting conversion to one real row instead of the advertised !ref.
-  const readRow=r=>{const values=XLSX.utils.sheet_to_json(sheet,{header:1,range:{s:{r,c:firstColumn},e:{r,c:lastColumn}},defval:'',raw:true,blankrows:true})[0]||[];return Array.from({length:width},(_,i)=>values[i]??'');};
+  const readRow=r=>{const values=XLSX.utils.sheet_to_json(sheet,{header:1,range:{s:{r,c:firstColumn},e:{r,c:lastColumn}},defval:'',raw:true,blankrows:true})[0]||[];return Array.from({length:width},(_,i)=>{const cell=sheet[XLSX.utils.encode_cell({r,c:firstColumn+i})];return cleanValue(values[i],typeof cell?.w==='string'?cell.w:'');});};
   const headers=uniqueHeaders(readRow(header-1));
   const rows=[],formats=[],rowNumbers=[];let protectedIdentifiers=0;
   actualRows.forEach(excelRow=>{
@@ -319,13 +509,13 @@ function getData(source) {
       const cell=sheet[XLSX.utils.encode_cell({r:excelRow,c:firstColumn+i})];
       if(cell?.t==='n'&&Number.isInteger(cell.v)&&/^0{2,}(?:[- /]?0+)*$/.test(cell.z||'')){
         protectedIdentifiers++;
-        if(source.preserveIdentifiers!==false){row[i]=XLSX.utils.format_cell(cell);return '@';}
+        if(source.preserveIdentifiers!==false){row[i]=XLSX.utils.format_cell({...cell,w:undefined});return '@';}
       }
-      return cell?.z||'';
+      return cleanFormat(cell?.z);
     });
     rows.push(row);formats.push(rowFormats);rowNumbers.push(excelRow+1);
   });
-  return {headers,rows,formats,rowNumbers,protectedIdentifiers};
+  return {headers,rows,formats,rowNumbers,protectedIdentifiers,headerRow:header,firstColumn};
 }
 function splitData(data,column) {
   const map=new Map();
@@ -340,14 +530,145 @@ function mergeGroups(groups,ids,name) {
   for(const g of groups){if(selected.has(g.id)){if(!inserted){result.push(combined);inserted=true;}}else result.push(g);}
   return result;
 }
-function mergeTables(tables) {
-  if(tables.length<2)throw new Error('请至少添加两个文件。');
-  const headers=[...new Set(tables.flatMap(t=>t.headers))];
+function headerKey(value){return display(value).replace(/[！-～]/g,c=>String.fromCharCode(c.charCodeAt(0)-65248)).replace(/[\s\u200b\ufeff]+/g,'').replace(/[:：]+$/,'').toLocaleLowerCase();}
+function rowKey(row){return JSON.stringify(row.map(headerKey));}
+const fieldLabel=/^(序号|编号|编码|代码|id|姓名|名称|人员|单位|部门|岗位|职务|日期|时间|金额|数量|单价|合价|总价|规格|型号|产品|商品|项目|地址|电话|手机|邮箱|备注|说明|城市|渠道|工时|补贴|人数|年龄|性别|.*(?:编号|编码|名称|日期|时间|金额|数量|姓名|电话|单位|部门)(?:[（(].*[)）])?)$/i;
+function worksheetRows(sheet){
+  const rows=new Map();
+  for(const address of Object.keys(sheet||{})){
+    const cell=sheet[address];if(address[0]==='!'||!hasCellValue(cell)||!/^[A-Z]+[1-9]\d*$/i.test(address))continue;
+    const {r,c}=XLSX.utils.decode_cell(address);if(r<0||r>1048575||c<0||c>16383)continue;
+    if(!rows.has(r))rows.set(r,new Map());rows.get(r).set(c,cell);
+  }
+  return [...rows].sort((a,b)=>a[0]-b[0]);
+}
+function findMergeHeader(source,rawRows){
+  const sheet=source.wb.Sheets[source.sheet];let header=Number(source.header)||1;
+  if(source.autoHeader!==false){
+    let best=-Infinity;
+    for(const [r,cells] of rawRows.slice(0,80)){
+      const values=[...cells.values()].map(cell=>cleanValue(cell.v)),strings=values.filter(v=>typeof v==='string'),known=strings.filter(v=>fieldLabel.test(headerKey(v))).length;
+      const score=values.length*3+known*8+strings.length/values.length*4-(values.length-strings.length)*5-strings.filter(v=>v.length>45).length*4;
+      if(score>best){best=score;header=r+1;}
+    }
+  }
+  let start=header-1,end=start;const merges=Array.isArray(sheet?.['!merges'])?sheet['!merges']:[];
+  // Fold real merged header levels into a single output field row.
+  for(let n=0;n<2;n++){
+    const above=rawRows.find(([r])=>r===start-1);
+    if(!above||above[1].size<2||!merges.some(m=>m.s.r===start-1&&(m.e.c>m.s.c||m.e.r>=start)))break;
+    start--;
+  }
+  for(let n=0;n<2;n++){
+    const below=rawRows.find(([r])=>r===end+1);
+    if(!below||!merges.some(m=>m.s.r<=end&&m.e.r>=end&&m.e.c>m.s.c))break;
+    const values=[...below[1].values()].map(c=>cleanValue(c.v));
+    if(values.filter(v=>typeof v==='string'&&fieldLabel.test(headerKey(v))).length<2)break;
+    end++;
+  }
+  return {header:start+1,depth:end-start+1};
+}
+function detectMergeHeader(source){return findMergeHeader(source,worksheetRows(source.wb.Sheets[source.sheet]));}
+function getMergeData(source){
+  const sheet=source.wb.Sheets[source.sheet],rawRows=worksheetRows(sheet),found=findMergeHeader(source,rawRows);
+  const data=getData({...source,header:found.header}),width=data.headers.length,first=data.firstColumn,merges=Array.isArray(sheet['!merges'])?sheet['!merges']:[];
+  const rawVector=r=>Array.from({length:width},(_,j)=>cleanValue(sheet[XLSX.utils.encode_cell({r,c:first+j})]?.v));
+  const labelAt=(r,c)=>{let cell=sheet[XLSX.utils.encode_cell({r,c})];if(!hasCellValue(cell)){const m=merges.find(m=>m.s.r<=r&&m.e.r>=r&&m.s.c<=c&&m.e.c>=c);if(m)cell=sheet[XLSX.utils.encode_cell(m.s)];}return display(cleanValue(cell?.v)).trim();};
+  const levels=Array.from({length:width},(_,j)=>Array.from({length:found.depth},(_,i)=>labelAt(found.header-1+i,first+j)).filter((v,i,a)=>v&&a.indexOf(v)===i));
+  const leaves=levels.map(a=>a[a.length-1]||''),counts=new Map();leaves.forEach(v=>counts.set(headerKey(v),(counts.get(headerKey(v))||0)+1));
+  data.headers=uniqueHeaders(levels.map((a,i)=>counts.get(headerKey(leaves[i]))>1?a.join(' / '):leaves[i]));
+  const indices=data.rowNumbers.map((r,i)=>({r,i})).filter(({r})=>r>=found.header+found.depth);
+  const rows=indices.map(({i})=>data.rows[i]),formats=indices.map(({i})=>data.formats[i]),rowNumbers=indices.map(({r})=>r);
+  const formulas={};indices.forEach(({r},i)=>{if(summaryLabel(rows[i],data.headers))formulas[i]=Array.from({length:width},(_,j)=>{const value=sheet[XLSX.utils.encode_cell({r:r-1,c:first+j})]?.f;return typeof value==='string'?value:'';});});
+  return {...data,rows,formats,rowNumbers,repairedDates:source.repairedDates||0,sourceName:source.name||source.sheet,mergeContext:{header:found.header,depth:found.depth,headers:Array.from({length:found.depth},(_,i)=>rawVector(found.header-1+i)),prefix:rawRows.filter(([r])=>r<found.header-1).map(([r])=>rawVector(r)),formulas}};
+}
+function summaryLabel(row,headers=[]){
+  if(!Array.isArray(row))return null;
+  const index=row.findIndex(v=>/^(?:(?:本页|本表|本期|本月|本次|本组|部门|分项|分类|全表|全部))?(?:小计|合计|共计|总计|累计|汇总|总合计|总额|总数)(?:[（(].*[)）])?$/.test(headerKey(v)));if(index<0)return null;
+  if(row.some((v,c)=>c!==index&&headerKey(v)&&/序号|编号|编码|代码|身份证|账号|^id$/i.test(headerKey(headers[c]))))return null;
+  const first=row.findIndex(v=>headerKey(v)!=='');
+  if(first!==index&&row.some((v,c)=>c!==index&&headerKey(v)&&numericValue(v)===null))return null;
+  return {index,label:display(row[index])};
+}
+function footerLabel(row,headers=[]){
+  const cells=row.map(v=>display(v).trim()).filter(Boolean);if(!cells.length)return false;
+  const firstIndex=row.findIndex(v=>headerKey(v));
+  if(row.some((v,c)=>c!==firstIndex&&headerKey(v)&&/序号|编号|编码|代码|身份证|账号|^id$/i.test(headerKey(headers[c]))))return false;
+  const joined=cells.join(' '),first=cells[0];
+  if(/^(?:第\s*\d+\s*页|页(?:码|次)\s*[:：]|共\s*\d+\s*页)/.test(first)||/^(?:本页)?共(?:计)?\s*\d+\s*(?:条|行|笔|份)(?:记录|数据)?[。.]?$/.test(first)||/^page\s+\d+(?:\s+(?:of|\/)\s+\d+)?$/i.test(joined))return true;
+  return (cells.length<=4||(cells.length<=8&&!row.some(v=>typeof v==='number')))&&/^(?:(?:制表人?|填表人?|填报人?|编制人?|审核人?|复核人?|审批人?|负责人|经办人|统计人|报送单位|制表单位|签字|盖章|打印人|打印时间|打印日期|生成时间|导出时间|制表日期|填报日期|填表日期|报送日期|数据来源)(?:\s*[:：]|$)|(?:备注|附注|注|说明|提示|声明)\s*[:：]|本(?:表|报告).*(?:仅供|供内部|统计口径|数据说明))/.test(first);
+}
+function numericValue(value){
+  if(typeof value==='number')return Number.isFinite(value)?value:null;
+  if(typeof value!=='string')return null;const text=value.trim();
+  if(!/^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text)||/^[+-]?0\d/.test(text))return null;
+  const number=Number(text.replace(/,/g,''));return Number.isFinite(number)?number:null;
+}
+function sumColumn(rows,column){let total=0,correction=0,count=0;for(const row of rows){const number=numericValue(row[column]);if(number===null)continue;const value=number-correction,next=total+value;correction=(next-total)-value;total=next;count++;}return {value:Number(total.toPrecision(15)),count};}
+function maySum(header,formats,column){
+  if(/序号|编号|编码|代码|证件|身份证|电话|手机|邮编|账号|日期|时间|单价|均价|平均|比例|占比|百分比|税率|利率|增长率|余额|年份|年度|^(?:id|code|phone|date|time)$/i.test(headerKey(header)))return false;
+  return !formats.some(row=>{const f=cleanFormat(row?.[column]);return /%/.test(f)||(f&&XLSX.SSF.is_date(f));});
+}
+function mergeTables(tables,{clean=true,totals='auto'}={}) {
+  if(!Array.isArray(tables)||tables.length<2)throw new Error('请至少添加两个文件。');
+  const headers=[],keys=new Map();
+  const prepared=tables.map((table,index)=>{
+    if(!Array.isArray(table?.headers)||!table.headers.length)throw new Error(`第 ${index+1} 份表格没有可用表头。`);
+    const localHeaders=uniqueHeaders(table.headers),occurrences=new Map(),mapping=localHeaders.map(h=>{const base=headerKey(h),n=(occurrences.get(base)||0)+1;occurrences.set(base,n);const key=n===1?base:`${base}::${n}`;if(!keys.has(key)){keys.set(key,headers.length);headers.push(h);}return keys.get(key);});
+    const entries=[];(Array.isArray(table.rows)?table.rows:[]).forEach((row,i)=>{if(!Array.isArray(row))return;const values=Array.from({length:localHeaders.length},(_,c)=>cleanValue(row[c]));if(!values.some(v=>headerKey(v)))return;entries.push({values,formats:localHeaders.map((_,c)=>cleanFormat(table.formats?.[i]?.[c])),number:table.rowNumbers?.[i]??i+2,original:i});});
+    const headerRows=[localHeaders,...(table.mergeContext?.headers||[])],headerSet=new Set(headerRows.map(rowKey)),prefix=new Set((table.mergeContext?.prefix||[]).map(rowKey));
+    return {table,localHeaders,mapping,entries,headerSet,prefix,name:table.sourceName||`文件 ${index+1}`};
+  });
   if(headers.length>16384)throw new Error('合并结果超过 Excel 单张工作表的列数上限。');
-  const rows=[],formats=[];
-  for(const t of tables){const indices=headers.map(h=>t.headers.indexOf(h));t.rows.forEach((r,row)=>{rows.push(indices.map(i=>i<0?'':r[i]));formats.push(indices.map(i=>i<0?'':t.formats?.[row]?.[i]||''));});}
+  // Repeated free-form tail notes are removable only after the last identifiable
+  // business record. Repeated business rows themselves are never deduplicated.
+  const tailCounts=new Map();
+  for(const p of prepared){
+    const ids=p.localHeaders.map((h,c)=>/序号|编号|编码|代码|身份证|账号|^id$/i.test(headerKey(h))?c:-1).filter(c=>c>=0);p.tailCandidates=new Set();let lastRecord=-1;
+    if(ids.length)for(let i=0;i<p.entries.length;i++){const row=p.entries[i].values;if(p.headerSet.has(rowKey(row))||summaryLabel(row,p.localHeaders)||footerLabel(row,p.localHeaders))continue;if(ids.some(c=>{const value=display(row[c]).trim();return value&&(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)||value.length<=6||row.filter(v=>headerKey(v)).length>=3);}))lastRecord=i;}
+    if(lastRecord>=0)for(let i=lastRecord+1;i<p.entries.length;i++){const values=p.entries[i].values.filter(v=>headerKey(v));if(values.length&&values.length<=3&&values.every(v=>typeof v==='string')){const key=rowKey(p.entries[i].values);p.tailCandidates.add(i);tailCounts.set(key,(tailCounts.get(key)||0)+1);}}
+  }
+  const rows=[],formats=[],removed=[],files=[],sumColumns=new Set();let totalLabel=0;
+  for(const p of prepared){
+    const kept=[],summaries=[];let segmentStart=0;const stats={name:p.name,header:p.table.mergeContext?.header||p.table.headerRow||1,headers:0,footers:0,summaries:0,input:p.entries.length,kept:0};
+    const kinds=p.entries.map(e=>p.headerSet.has(rowKey(e.values))?'header':summaryLabel(e.values,p.localHeaders)?'summary':footerLabel(e.values,p.localHeaders)?'footer':'');
+    for(let i=0;i<p.entries.length;i++){
+      const entry=p.entries[i],summary=summaryLabel(entry.values,p.localHeaders);let kind=clean?kinds[i]:'';
+      if(clean&&!kind&&p.prefix.has(rowKey(entry.values))){for(let j=i+1;j<Math.min(i+9,p.entries.length);j++){if(kinds[j]==='header'){kind='header';break;}if(kinds[j]!=='footer'&&!p.prefix.has(rowKey(p.entries[j].values)))break;}}
+      if(clean&&!kind&&p.tailCandidates.has(i)&&(tailCounts.get(rowKey(entry.values))||0)>1)kind='footer';
+      if(kind){
+        stats[kind==='header'?'headers':kind==='footer'?'footers':'summaries']++;
+        removed.push({p,entry,reason:kind==='header'?'重复表头 / 页眉':kind==='footer'?'页脚 / 说明':'原表合计 / 小计'});
+        if(kind==='summary'){summaries.push({entry,summary,before:kept.length,segmentStart});segmentStart=kept.length;}
+      }else kept.push(entry);
+    }
+    const numericCache=new Map(),formatCache=new Map(),keptFormats=kept.map(e=>e.formats);
+    const prefix=c=>{if(!numericCache.has(c)){const values=[0],counts=[0];let sum=0,correction=0,count=0;for(const entry of kept){const number=numericValue(entry.values[c]);if(number!==null){const v=number-correction,next=sum+v;correction=(next-sum)-v;sum=next;count++;}values.push(sum);counts.push(count);}numericCache.set(c,{values,counts});}return numericCache.get(c);};
+    if(clean&&totals==='auto')for(const record of summaries){
+      totalLabel=p.mapping[record.summary.index];
+      for(let c=0;c<p.localHeaders.length;c++){
+        const formula=p.table.mergeContext?.formulas?.[record.entry.original]?.[c];
+        const explicit=typeof formula==='string'&&/^(?:=?\s*SUM\s*\(|=?\s*SUBTOTAL\s*\(\s*(?:9|109)\s*[,;])/i.test(formula);
+        const expected=numericValue(record.entry.values[c]);if(expected===null&&!explicit)continue;if(!formatCache.has(c))formatCache.set(c,maySum(p.localHeaders[c],keptFormats,c));if(!formatCache.get(c))continue;
+        const sums=prefix(c),all={value:sums.values[record.before],count:sums.counts[record.before]},part={value:sums.values[record.before]-sums.values[record.segmentStart],count:sums.counts[record.before]-sums.counts[record.segmentStart]};
+        const close=sum=>expected!==null&&sum.count>0&&Math.abs(sum.value-expected)<=Math.max(1e-8,Math.abs(expected)*1e-9);
+        if((explicit&&(all.count||part.count))||close(all)||close(part))sumColumns.add(p.mapping[c]);
+      }
+    }
+    for(const entry of kept){const row=Array(headers.length).fill(''),format=Array(headers.length).fill('');p.mapping.forEach((target,c)=>{row[target]=entry.values[c];format[target]=entry.formats[c];});rows.push(row);formats.push(format);}
+    stats.kept=kept.length;files.push(stats);
+  }
+  const dataRows=rows.length;let summaryRowCount=0;
+  if(clean&&totals==='auto'&&sumColumns.size&&dataRows){
+    const summary=Array(headers.length).fill(''),format=Array(headers.length).fill('');
+    if(sumColumns.has(totalLabel))totalLabel=headers.findIndex((_,c)=>!sumColumns.has(c));if(totalLabel<0)totalLabel=0;
+    summary[totalLabel]='合计';for(const column of sumColumns){if(column===totalLabel)continue;summary[column]=sumColumn(rows,column).value;format[column]=formats.find(r=>r[column])?.[column]||'';}
+    rows.push(summary);formats.push(format);summaryRowCount=1;
+  }
   if(rows.length>1048575)throw new Error('合并结果超过 Excel 单张工作表的行数上限。');
-  return {headers,rows,formats};
+  const removedData={headers:uniqueHeaders(['来源文件','原始行号','清理原因',...headers]),rows:[],formats:[]};
+  for(const item of removed){const row=Array(headers.length).fill(''),format=Array(headers.length).fill('');item.p.mapping.forEach((target,c)=>{row[target]=item.entry.values[c];format[target]=item.entry.formats[c];});removedData.rows.push([item.p.name,item.entry.number,item.reason,...row]);removedData.formats.push(['','','',...format]);}
+  return {headers,rows,formats,summaryRowCount,mergeReport:{clean,dataRows,summaryRowCount,repairedDates:prepared.reduce((s,p)=>s+(p.table.repairedDates||0),0),sumColumns:[...sumColumns].map(c=>headers[c]),headersRemoved:files.reduce((s,f)=>s+f.headers,0),footersRemoved:files.reduce((s,f)=>s+f.footers,0),summariesRemoved:files.reduce((s,f)=>s+f.summaries,0),files,removedData}};
 }
 function lookupTables(main,reference,{mainKey,refKey,returns,trim=true,ignoreCase=false,duplicate='first',missing=''}) {
   if(!returns.length)throw new Error('请至少选择一个返回字段。');
@@ -368,7 +689,16 @@ function uniqueFilenames(names){const used=new Set();return names.map(n=>{const 
 function splitFilenames(groups){return uniqueFilenames(groups.map(g=>`${safeFilename(g.name).slice(0,85)}-${g.items.length}`));}
 function groupData(data,group){return {headers:data.headers,rows:group.items.map(x=>x.row),formats:group.items.map(x=>data.formats?.[x.index]||[]),rowNumbers:group.items.map(x=>data.rowNumbers?.[x.index]??x.index+2)};}
 function subsetData(data,indices){return {...data,rows:indices.map(i=>data.rows[i]),formats:indices.map(i=>data.formats?.[i]||[]),rowNumbers:indices.map(i=>data.rowNumbers?.[i]??i+1)};}
-function makeWorkbook(data){const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet([data.headers,...data.rows.map(row=>row.map(value=>value===''?null:value))],{cellDates:true});data.formats?.forEach((r,i)=>r.forEach((format,j)=>{const cell=ws[XLSX.utils.encode_cell({r:i+1,c:j})];if(format&&cell)cell.z=format;}));ws['!cols']=data.headers.map(h=>({wch:Math.max(14,Math.min(display(h).length*2+2,30))}));if(data.rows.length)ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.rows.length,c:data.headers.length-1}})};XLSX.utils.book_append_sheet(wb,ws,'数据');return wb;}
+function makeWorkbook(data){
+  if(!data||!Array.isArray(data.headers)||!data.headers.length)throw new Error('没有可导出的表格字段。');
+  const rows=Array.isArray(data.rows)?data.rows:[],values=rows.map(row=>Array.from({length:data.headers.length},(_,i)=>{const v=cleanValue(Array.isArray(row)?row[i]:null);return v===''?null:v;}));
+  const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([data.headers.map(v=>cleanValue(v)),...values],{cellDates:true});
+  if(Array.isArray(data.formats))data.formats.forEach((row,i)=>{if(!Array.isArray(row))return;row.forEach((format,j)=>{const cell=ws[XLSX.utils.encode_cell({r:i+1,c:j})],safe=cleanFormat(format);if(safe&&cell)cell.z=safe;});});
+  ws['!cols']=data.headers.map(h=>({wch:Math.max(14,Math.min(display(h).length*2+2,30))}));
+  const filteredRows=rows.length-(data.summaryRowCount||0);
+  if(filteredRows>0)ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:filteredRows,c:data.headers.length-1}})};
+  XLSX.utils.book_append_sheet(wb,ws,'数据');return wb;
+}
 
 const paths={split:'M4 4h16v5H4z M8 9v5H4v6h6v-6H8 M16 9v5h-2v6h6v-6h-4',merge:'M4 4h6v6H4z M14 4h6v6h-6z M7 10v4h10v-4 M12 14v6 M7 20h10',lookup:'M10 17a7 7 0 1 1 5-2l5 5 M7 8h6 M7 11h4',grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',shield:'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z m-4 9 3 3 5-6',help:'M9.1 9a3 3 0 1 1 5.8 1c-.6 1-2.9 1.5-2.9 3 M12 17h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',check:'m5 12 4 4L19 6',upload:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-7 m-3 3 3-3 3 3',file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 12h8 M8 16h8',eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',spark:'m12 2 2.8 7.2L22 12l-7.2 2.8L12 22l-2.8-7.2L2 12l7.2-2.8z',play:'m9 5 10 7-10 7z',download:'M12 3v12 m-4-4 4 4 4-4 M4 16v5h16v-5',close:'m6 6 12 12 M6 18 18 6',edit:'m15 5 4 4 M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15z',grip:'M9 5h.01 M15 5h.01 M9 12h.01 M15 12h.01 M9 19h.01 M15 19h.01',up:'m6 14 6-6 6 6',down:'m6 10 6 6 6-6',link:'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',info:'M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',lock:'M5 10h14v11H5z M8 10V6a4 4 0 0 1 8 0v4'};
 const icon=(name,cls='')=>`<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.file}"/></svg>`;
@@ -376,7 +706,7 @@ const esc=s=>display(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;
 const $=s=>document.querySelector(s);
 const modes={split:{name:'拆表',title:'按字段拆分表格',sub:'先预览分组，再重命名、合并或下载。',steps:['上传文件','选择字段','确认下载']},merge:{name:'合表',title:'将多张表合为一张',sub:'按表头名称对齐列，缺少的字段留空。',steps:['添加文件','调整顺序','预览下载']},lookup:{name:'Lookup',title:'从参照表补充数据',sub:'通过匹配列关联两张表，选择需要返回的字段。',steps:['选择表格','设置匹配','预览下载']}};
 const demoData={headers:['员工编号','姓名','所属部门','城市'],rows:[['EB001','林晓','产品部','上海'],['EB002','陈一','设计部','杭州'],['EB003','王晴','市场部','北京'],['EB004','周远','产品部','上海'],['EB005','李可','设计部','深圳'],['EB006','张宁','市场部','杭州']]};
-const state={mode:'split',split:{source:null,data:null,col:0,groups:[],selected:new Set(),history:[],groupView:null},merge:{files:[],result:null,filename:'合并结果'},lookup:{main:null,ref:null,mainData:null,refData:null,mainKey:0,refKey:0,returns:[],trim:true,ignoreCase:false,duplicate:'first',missing:'',result:null,duplicateReport:null,filter:'all',filename:'Lookup匹配结果'},dirty:{split:false,merge:false,lookup:false}};
+const state={mode:'split',split:{source:null,data:null,col:0,groups:[],selected:new Set(),history:[],groupView:null},merge:{files:[],result:null,filename:'合并结果',clean:true,totals:'auto'},lookup:{main:null,ref:null,mainData:null,refData:null,mainKey:0,refKey:0,returns:[],trim:true,ignoreCase:false,duplicate:'first',missing:'',result:null,duplicateReport:null,filter:'all',filename:'Lookup匹配结果'},dirty:{split:false,merge:false,lookup:false}};
 let pickTarget='',busy=false,dragIndex=null,toastTimer,pendingIntent=null,worker=null,workerUrl=null,requestSerial=0,searchTimer;
 const requests=new Map(),previews=new Map(),viewState=new Map();
 const blankSplit=()=>({source:null,data:null,col:0,groups:[],selected:new Set(),history:[],groupView:null});
@@ -405,7 +735,7 @@ function table(data,key){
  previews.set(key,data);let view=viewState.get(key);
  if(!view){view={page:0,size:100,search:'',cache:null};viewState.set(key,view);}
  if(view.cache?.rows!==data.rows||view.cache?.search!==view.search){const needle=view.search.toLocaleLowerCase(),indices=[];data.rows.forEach((r,i)=>{if(!needle||r.some((v,j)=>cellText(data,i,j).toLocaleLowerCase().includes(needle)))indices.push(i);});view.cache={rows:data.rows,search:view.search,indices};}
- const indices=view.cache.indices,pages=Math.max(1,Math.ceil(indices.length/view.size));view.page=Math.min(view.page,pages-1);const offset=view.page*view.size,visible=indices.slice(offset,offset+view.size),expanded=['expanded-preview','group-preview','duplicate-preview'].includes(key);
+ const indices=view.cache.indices,pages=Math.max(1,Math.ceil(indices.length/view.size));view.page=Math.min(view.page,pages-1);const offset=view.page*view.size,visible=indices.slice(offset,offset+view.size),expanded=['expanded-preview','group-preview','duplicate-preview','merge-cleaned'].includes(key);
  return `<div class="data-preview" data-preview-key="${key}"><div class="preview-tools"><label class="preview-search">${icon('lookup')}<input type="search" data-search="${key}" value="${esc(view.search)}" placeholder="搜索全部数据" aria-label="搜索预览数据"></label><select data-page-size="${key}" aria-label="每页行数">${[25,50,100,200,500].map(n=>`<option value="${n}" ${view.size===n?'selected':''}>${n} 行 / 页</option>`).join('')}</select>${!expanded?`<button class="button secondary small expand-preview-button" data-action="expand-preview" data-key="${key}">${icon('eye')}展开预览</button>`:''}</div><div class="table-wrap" tabindex="0" aria-label="数据表格，可横向和纵向滚动"><table><thead><tr><th title="原始行号">行</th>${data.headers.map(h=>`<th title="${esc(h)}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${visible.map(i=>`<tr><td>${data.rowNumbers?.[i]??i+1}</td>${data.headers.map((h,j)=>`<td title="${esc(cellText(data,i,j))}">${esc(cellText(data,i,j))||'<span class="blank-cell" aria-label="空白"></span>'}</td>`).join('')}</tr>`).join('')}${!visible.length?`<tr><td colspan="${data.headers.length+1}" class="no-results">${view.search?'没有找到符合条件的数据':'没有数据行'}</td></tr>`:''}</tbody></table></div><div class="preview-foot"><span>${view.search?`找到 ${indices.length} / `:'共 '}${data.rows.length.toLocaleString()} 行 · ${data.headers.length} 列</span><div class="pagination"><button class="icon-button" data-action="page" data-key="${key}" data-delta="-1" aria-label="上一页" ${!view.page?'disabled':''}>${icon('up')}</button><span>${view.page+1} / ${pages}</span><button class="icon-button" data-action="page" data-key="${key}" data-delta="1" aria-label="下一页" ${view.page>=pages-1?'disabled':''}>${icon('down')}</button></div></div></div>`;
 }
 function refreshTable(key){const node=document.querySelector(`[data-preview-key="${key}"]`);if(node&&previews.has(key))node.outerHTML=table(previews.get(key),key);}
@@ -421,7 +751,8 @@ function pushHistory(value=snapshot()){state.split.history.push(value);if(state.
 function updateFinalNames(){const s=state.split,names=splitFilenames(s.groups),byId=new Map(s.groups.map((g,i)=>[g.id,names[i]]));document.querySelectorAll('[data-final-name]').forEach(el=>{const name=byId.get(el.dataset.finalName);if(name!==undefined){el.textContent=name;el.title=name;}});}
 function renderGroups(){const s=state.split,names=splitFilenames(s.groups),needle=(s.groupSearch||'').toLocaleLowerCase(),visible=s.groups.map((g,i)=>({g,i})).filter(({g,i})=>!needle||g.name.toLocaleLowerCase().includes(needle)||names[i].toLocaleLowerCase().includes(needle));return `<div class="preview-top"><h3 class="section-label">${icon('split')}拆分结果<span class="tag">${s.groups.length} 个文件</span></h3><div class="preview-header-actions"><button class="text-button" data-action="undo-groups" ${!s.history.length?'disabled':''}>撤销</button><button class="text-button" data-action="split-reset">恢复分组</button></div></div><p class="preview-caption">全部分组直接展示。可改名、查看数据或选择多个分组合并；名称后自动附加条目数。</p><div class="group-controls"><div class="group-toolbar"><label class="check-option"><input type="checkbox" data-select-all ${s.selected.size===s.groups.length?'checked':''}>全选</label><span>${s.selected.size?`已选 ${s.selected.size} 项 · `:''}${needle?`显示 ${visible.length} / ${s.groups.length} 个分组`:`全部 ${s.groups.length} 个分组`} · 共 ${s.data.rows.length} 行</span></div><div class="group-actions">${s.groups.length>15?`<input type="search" data-group-search value="${esc(s.groupSearch||'')}" placeholder="搜索全部分组" aria-label="搜索分组">`:''}<button class="button secondary small" data-action="merge-groups" ${s.selected.size<2?'disabled':''}>${icon('merge')}合并选中分组</button><button class="button" data-action="download-split">${icon('download')}确认并下载 ZIP · ${s.groups.length} 个文件</button></div></div><div class="groups">${visible.map(({g,i})=>`<div class="group"><input type="checkbox" data-group-select="${g.id}" aria-label="选择 ${esc(g.name)}" ${s.selected.has(g.id)?'checked':''}>${icon('file')}<div class="group-data"><input type="text" value="${esc(g.name)}" data-original-name="${esc(g.name)}" data-group-name="${g.id}" aria-label="文件名"><small class="final-filename" data-final-name="${g.id}" title="${esc(names[i])}">${esc(names[i])}</small></div><button class="text-button group-view-button" data-action="view-group" data-group="${g.id}">查看</button><span class="group-count">${g.items.length} 条</span></div>`).join('')}${!visible.length?'<p class="field-help">没有找到符合条件的分组。</p>':''}</div>`;}
 function outputBar(kind){const s=state[kind];return `<div class="result-bar"><input type="text" data-output-name="${kind}" id="${kind}-filename" value="${esc(s.filename)}" aria-label="导出文件名"><button class="button" data-action="download-${kind}">${icon('download')}下载 Excel</button></div><p class="output-name">最终文件名：<span data-output-final="${kind}">${esc(safeFilename(s.filename))}.xlsx</span></p>`;}
-function renderMerge(){const s=state.merge;return `<div class="work-grid"><div class="config-panel"><div class="source-block"><h3 class="section-label">${icon('file')}源文件<span class="tag">可多选</span></h3>${dropzone('merge',s.files.length>0)}</div><div class="setup-block">${s.files.length?`<div class="merge-list">${s.files.map((f,i)=>`<div class="merge-file" draggable="true" data-drag-index="${i}"><div class="merge-file-top"><span class="drag-handle">${icon('grip')}</span><span class="order">${i+1}</span><span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span><button class="icon-button" data-action="move-file" data-index="${i}" data-delta="-1" aria-label="上移" ${i===0?'disabled':''}>${icon('up')}</button><button class="icon-button" data-action="move-file" data-index="${i}" data-delta="1" aria-label="下移" ${i===s.files.length-1?'disabled':''}>${icon('down')}</button><button class="icon-button" data-action="remove-file" data-index="${i}" aria-label="移除文件">${icon('close')}</button></div><div class="file-config"><div><label>工作表</label><select data-sheet="merge-${i}" aria-label="${esc(f.name)} 工作表">${sheetOptions(f)}</select></div><div><label>表头行</label><input type="number" min="1" value="${f.header}" data-header="merge-${i}" aria-label="${esc(f.name)} 表头行"></div></div>${formatControl(f,`merge-${i}`)}</div>`).join('')}</div><p class="field-help">拖动卡片调整顺序，也可使用上下移动按钮。</p>`:''}<button class="button full" data-action="merge-preview" ${s.files.length<2?'disabled':''}>${icon('merge')}合并并预览${s.files.length?` · ${s.files.length} 个文件`:''}</button></div></div><div class="preview-panel"><div class="preview-top"><h3 class="section-label">${icon('eye')}合并结果</h3>${s.result?`<span class="tag">${s.files.length} 个文件</span>`:''}</div>${s.result?`${table(s.result,'merge-result')}${outputBar('merge')}`:emptyPreview('等待合并','添加至少两份文件，调整顺序后开始合并。','merge')}</div></div>`;}
+function mergeSummary(result){const report=result.mergeReport;if(!report)return '';const total=report.headersRemoved+report.footersRemoved+report.summariesRemoved;return `<div class="merge-summary"><div><strong>已合并 ${report.dataRows} 条明细</strong><p>${report.clean?`清理 ${report.headersRemoved} 行重复表头、${report.footersRemoved} 行页脚、${report.summariesRemoved} 行原表统计`:'按原始内容合并'}${report.summaryRowCount?' · 已重新生成一行总合计':''}${report.repairedDates?` · 已兼容 ${report.repairedDates} 个异常日期单元格`:''}</p>${report.sumColumns.length?`<p>求和字段：${report.sumColumns.map(esc).join('、')}</p>`:report.clean&&report.summariesRemoved?'<p>原表统计未能确认求和规则，输出保留完整明细，可查看原始统计。</p>':''}</div>${total?'<button class="text-button" data-action="view-merge-cleaned">查看清理明细</button>':''}</div>`;}
+function renderMerge(){const s=state.merge;return `<div class="work-grid"><div class="config-panel"><div class="source-block"><h3 class="section-label">${icon('file')}源文件<span class="tag">可多选</span></h3>${dropzone('merge',s.files.length>0)}<div class="merge-clean-options"><label class="check-option"><input type="checkbox" data-merge-clean ${s.clean!==false?'checked':''}>自动清理重复表头和页脚</label><p class="field-help">自动识别表头，业务记录按文件顺序保留。</p><label for="merge-totals">原表合计 / 小计</label><select id="merge-totals" data-merge-totals ${s.clean===false?'disabled':''}><option value="auto" ${(s.totals||'auto')==='auto'?'selected':''}>核对后重算一行总合计</option><option value="none" ${s.totals==='none'?'selected':''}>只保留合并明细</option></select><p class="field-help">只对可确认求和的列汇总，编号、日期、单价、比例不相加。</p></div></div><div class="setup-block">${s.files.length?`<div class="merge-list">${s.files.map((f,i)=>`<div class="merge-file" draggable="true" data-drag-index="${i}"><div class="merge-file-top"><span class="drag-handle">${icon('grip')}</span><span class="order">${i+1}</span><span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span><button class="icon-button" data-action="move-file" data-index="${i}" data-delta="-1" aria-label="上移" ${i===0?'disabled':''}>${icon('up')}</button><button class="icon-button" data-action="move-file" data-index="${i}" data-delta="1" aria-label="下移" ${i===s.files.length-1?'disabled':''}>${icon('down')}</button><button class="icon-button" data-action="remove-file" data-index="${i}" aria-label="移除文件">${icon('close')}</button></div><div class="file-config"><div><label>工作表</label><select data-sheet="merge-${i}" aria-label="${esc(f.name)} 工作表">${sheetOptions(f)}</select></div><div><label>表头行</label><input type="number" min="1" value="${f.header}" data-header="merge-${i}" aria-label="${esc(f.name)} 表头行"></div></div>${formatControl(f,`merge-${i}`)}<label class="check-option merge-auto-header"><input type="checkbox" data-merge-auto="${i}" ${f.autoHeader!==false?'checked':''}>自动识别表头<span class="file-meta">（手动改行号可指定）</span></label></div>`).join('')}</div><p class="field-help">拖动卡片调整顺序，也可使用上下移动按钮。</p>`:''}<button class="button full" data-action="merge-preview" ${s.files.length<2?'disabled':''}>${icon('merge')}合并并预览${s.files.length?` · ${s.files.length} 个文件`:''}</button></div></div><div class="preview-panel"><div class="preview-top"><h3 class="section-label">${icon('eye')}合并结果</h3>${s.result?`<span class="tag">${s.files.length} 个文件</span>`:''}</div>${s.result?`${mergeSummary(s.result)}${table(s.result,'merge-result')}${outputBar('merge')}`:emptyPreview('等待合并','添加至少两份文件，调整顺序后开始合并。','merge')}</div></div>`;}
 function lookupSource(which,label){const source=state.lookup[which],target=`lookup-${which}`;return `<div><h3 class="section-label">${label}</h3>${source?`<div class="file-info"><div class="lookup-file-top"><div class="file-name" title="${esc(source.name)}">${esc(source.name)}</div><button class="icon-button" data-upload="${target}" aria-label="更换${label}">${icon('upload')}</button></div><select data-sheet="${target}" aria-label="${label}工作表">${sheetOptions(source)}</select><label class="lookup-header">表头行<input type="number" min="1" value="${source.header}" data-header="${target}" aria-label="${label}表头行"></label></div>${formatControl(source,target)}`:dropzone(target)}</div>`;}
 function options(headers,value){return headers.map((h,i)=>`<option value="${i}" ${i===value?'selected':''}>${esc(h)}</option>`).join('');}
 function lookupData(){const s=state.lookup;if(s.viewCache?.result===s.result&&s.viewCache.filter===s.filter)return s.viewCache.data;const indices=s.result.rows.map((r,i)=>i).filter(i=>s.filter==='all'||s.result.matchedRows[i]===(s.filter==='matched'));const data=s.filter==='all'?s.result:subsetData(s.result,indices);s.viewCache={result:s.result,filter:s.filter,data};return data;}
@@ -429,9 +760,9 @@ function renderLookup(){const s=state.lookup,main=s.mainData,ref=s.refData,dupli
 function findSource(target){if(target==='split')return state.split.source;if(target.startsWith('merge-'))return state.merge.files[Number(target.split('-')[1])];return state.lookup[target.slice(7)];}
 function invalidate(target){if(target==='split'){Object.assign(state.split,{data:null,groups:[],selected:new Set(),history:[],groupView:null});resetTable('split-source');}else if(target.startsWith('merge')){state.merge.result=null;resetTable('merge-result');}else{Object.assign(state.lookup,{result:null,duplicateReport:null,error:null,mainKey:0,refKey:0,returns:[],viewCache:null});resetTable('lookup-result');}}
 async function refreshLookupSources(){const s=state.lookup;s.sourceError=null;s.mainData=null;s.refData=null;for(const key of ['main','ref']){if(s[key]){try{s[`${key}Data`]=await request('extract',{source:s[key]});}catch(e){s.sourceError=e.message;}}}}
-async function updateSource(target,field,value){const source=findSource(target);if(!source){if(target==='split')state.split.pendingHeader=value;render();return;}source[field]=value;invalidate(target);dirty(target==='split'?'split':target.startsWith('merge')?'merge':'lookup');if(target.startsWith('lookup'))await run('整理工作表',refreshLookupSources);render();}
-async function readFiles(files,target,confirmed=false){if(busy)return;if(!files.length)return;if(target!=='merge'&&files.length>1)throw new Error('这里一次只能选择一个文件。');for(const file of files){if(!/\.(xlsx|xls|csv)$/i.test(file.name))throw new Error(`不支持「${file.name}」，请选择 Excel 或 CSV 文件。`);if(file.size>30*1024*1024)throw new Error('单个文件不能超过 30 MB。');}const old=target==='merge'?null:findSource(target);if(old&&!old.demo&&!confirmed){confirmReplace('替换当前文件？',()=>readFiles(files,target,true));return;}await run('读取文件',async()=>{const inputs=[];for(const file of files)inputs.push({name:file.name,buffer:await file.arrayBuffer()});const loaded=await request('read',{files:inputs},inputs.map(f=>f.buffer));if(target==='split'){loaded[0].header=state.split.pendingHeader||1;state.split={...blankSplit(),source:loaded[0]};resetTable('split-source');dispose([old]);}else if(target==='merge'){state.merge.files.push(...loaded);invalidate('merge');}else{state.lookup[target.slice(7)]=loaded[0];invalidate(target);dispose([old]);await refreshLookupSources();}dirty(target==='split'?'split':target==='merge'?'merge':'lookup');render();toast(`已读取 ${loaded.length} 个文件`);});}
-async function sample(confirmed=false){const mode=state.mode;if(hasRealContent(mode)&&!confirmed){confirmReplace('用示例替换当前内容？',()=>sample(true));return;}await run('准备示例数据',async()=>{let definitions;if(mode==='split')definitions=[{name:'员工信息示例.xlsx',...demoData}];else if(mode==='merge')definitions=[{name:'第一季度员工.xlsx',headers:demoData.headers,rows:demoData.rows.slice(0,3)},{name:'第二季度员工.xlsx',headers:demoData.headers,rows:demoData.rows.slice(3)}];else definitions=[{name:'员工名单.xlsx',headers:demoData.headers.slice(0,2),rows:demoData.rows.map(r=>r.slice(0,2))},{name:'员工信息.xlsx',headers:demoData.headers,rows:demoData.rows.slice(0,5)}];const loaded=await request('sample',definitions);if(mode==='split'){dispose([state.split.source]);state.split={...blankSplit(),source:loaded[0]};resetTable('split-source');}else if(mode==='merge'){dispose(state.merge.files);state.merge={files:loaded,result:null,filename:'合并结果'};resetTable('merge-result');}else{dispose([state.lookup.main,state.lookup.ref]);Object.assign(state.lookup,{main:loaded[0],ref:loaded[1],mainKey:0,refKey:0,returns:[2,3],result:null,duplicateReport:null,error:null,missing:'',filter:'all',viewCache:null});await refreshLookupSources();resetTable('lookup-result');}state.dirty[mode]=false;render();toast('示例已就绪，可以直接体验完整流程。');});}
+async function updateSource(target,field,value){const source=findSource(target);if(!source){if(target==='split')state.split.pendingHeader=value;render();return;}source[field]=value;if(target.startsWith('merge')){if(field==='header')source.autoHeader=false;if(field==='sheet'&&source.autoHeader!==false){const found=await request('merge-header',{source});source.header=found.header;}}invalidate(target);dirty(target==='split'?'split':target.startsWith('merge')?'merge':'lookup');if(target.startsWith('lookup'))await run('整理工作表',refreshLookupSources);render();}
+async function readFiles(files,target,confirmed=false){if(busy)return;if(!files.length)return;if(target!=='merge'&&files.length>1)throw new Error('这里一次只能选择一个文件。');for(const file of files){if(!/\.(xlsx|xls|csv)$/i.test(file.name))throw new Error(`不支持「${file.name}」，请选择 Excel 或 CSV 文件。`);if(file.size>30*1024*1024)throw new Error('单个文件不能超过 30 MB。');}const old=target==='merge'?null:findSource(target);if(old&&!old.demo&&!confirmed){confirmReplace('替换当前文件？',()=>readFiles(files,target,true));return;}await run('读取文件',async()=>{const inputs=[];for(const file of files)inputs.push({name:file.name,buffer:await file.arrayBuffer()});const loaded=await request('read',{files:inputs,merge:target==='merge'},inputs.map(f=>f.buffer));if(target==='split'){loaded[0].header=state.split.pendingHeader||1;state.split={...blankSplit(),source:loaded[0]};resetTable('split-source');dispose([old]);}else if(target==='merge'){state.merge.files.push(...loaded);invalidate('merge');}else{state.lookup[target.slice(7)]=loaded[0];invalidate(target);dispose([old]);await refreshLookupSources();}dirty(target==='split'?'split':target==='merge'?'merge':'lookup');render();toast(`已读取 ${loaded.length} 个文件`);});}
+async function sample(confirmed=false){const mode=state.mode;if(hasRealContent(mode)&&!confirmed){confirmReplace('用示例替换当前内容？',()=>sample(true));return;}await run('准备示例数据',async()=>{let definitions;if(mode==='split')definitions=[{name:'员工信息示例.xlsx',...demoData}];else if(mode==='merge')definitions=[{name:'第一季度员工.xlsx',headers:demoData.headers,rows:demoData.rows.slice(0,3)},{name:'第二季度员工.xlsx',headers:demoData.headers,rows:demoData.rows.slice(3)}];else definitions=[{name:'员工名单.xlsx',headers:demoData.headers.slice(0,2),rows:demoData.rows.map(r=>r.slice(0,2))},{name:'员工信息.xlsx',headers:demoData.headers,rows:demoData.rows.slice(0,5)}];const loaded=await request('sample',definitions);if(mode==='split'){dispose([state.split.source]);state.split={...blankSplit(),source:loaded[0]};resetTable('split-source');}else if(mode==='merge'){dispose(state.merge.files);state.merge={files:loaded,result:null,filename:'合并结果',clean:true,totals:'auto'};resetTable('merge-result');}else{dispose([state.lookup.main,state.lookup.ref]);Object.assign(state.lookup,{main:loaded[0],ref:loaded[1],mainKey:0,refKey:0,returns:[2,3],result:null,duplicateReport:null,error:null,missing:'',filter:'all',viewCache:null});await refreshLookupSources();resetTable('lookup-result');}state.dirty[mode]=false;render();toast('示例已就绪，可以直接体验完整流程。');});}
 function saveBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 function celebrate(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;for(let i=0;i<20;i++){const el=document.createElement('i');el.className='confetti';el.style.left=`${25+Math.random()*65}%`;el.style.background=['#9ac77e','#1e8b59','#e3bd64','#b6cae4'][i%4];el.style.setProperty('--drift',`${Math.random()*200-100}px`);document.body.append(el);setTimeout(()=>el.remove(),2100);}}
 async function downloadResult(data,name,markMode=null){await run('生成 Excel 文件',async()=>{const {buffer}=await request('xlsx',{data});saveBlob(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),`${safeFilename(name)}.xlsx`);if(markMode)state.dirty[markMode]=false;celebrate();toast('Excel 已生成，浏览器将开始下载。');});}
@@ -455,7 +786,8 @@ async function action(name,el){switch(name){
  case 'download-split':{const s=state.split;if(!s.groups.length)return;if(s.groups.some(g=>!g.name.trim()))throw new Error('请为所有分组填写文件名。');await run('生成拆分文件',async()=>{const {buffer}=await request('zip',{data:s.data,groups:s.groups});saveBlob(new Blob([buffer],{type:'application/zip'}),'ExcelBomb_拆分结果.zip');state.dirty.split=false;celebrate();toast(`已生成 ${s.groups.length} 个 Excel 文件`);});break;}
  case 'move-file':moveFile(Number(el.dataset.index),Number(el.dataset.index)+Number(el.dataset.delta));break;
  case 'remove-file':dispose(state.merge.files.splice(Number(el.dataset.index),1));invalidate('merge');dirty('merge');render();break;
- case 'merge-preview':await run('合并表格',async()=>{state.merge.result=await request('merge',{sources:state.merge.files});resetTable('merge-result');dirty('merge');render();toast('合并完成，请预览后下载。');});break;
+ case 'merge-preview':await run('合并表格',async()=>{state.merge.result=await request('merge',{sources:state.merge.files,options:{clean:state.merge.clean!==false,totals:state.merge.totals||'auto'}});resetTable('merge-result');dirty('merge');render();toast('合并完成，请预览后下载。');});break;
+ case 'view-merge-cleaned':{const data=state.merge.result?.mergeReport?.removedData;if(!data)return;resetTable('merge-cleaned');modal(`<h2>合表清理明细</h2><p class="preview-caption">列出自动移除的结构行，原始文件没有被修改。</p>${table(data,'merge-cleaned')}`,'preview');break;}
  case 'download-merge':await downloadResult(state.merge.result,state.merge.filename,'merge');break;
  case 'lookup-preview':await run('匹配数据',async()=>{const s=state.lookup,response=await request('lookup',{main:s.main,ref:s.ref,options:{mainKey:s.mainKey,refKey:s.refKey,returns:s.returns,trim:s.trim,ignoreCase:s.ignoreCase,duplicate:s.duplicate,missing:''}});Object.assign(s,{mainData:response.main,refData:response.ref,result:response.result||null,duplicateReport:response.duplicateData||null,error:response.error||null,filter:'all',viewCache:null});resetTable('lookup-result');dirty('lookup');render();toast(response.error||`匹配完成：${s.result.matched} 行成功，${s.result.unmatched} 行未匹配`,!!response.error);});break;
  case 'lookup-filter':state.lookup.filter=el.dataset.filter;resetTable('lookup-result');render();break;
@@ -468,7 +800,10 @@ async function action(name,el){switch(name){
 document.addEventListener('click',async e=>{const upload=e.target.closest('[data-upload]'),el=e.target.closest('[data-action]');const actionName=el?.dataset.action;if(busy&&(upload||el)&&!['help','guide-tab','close-guide','close-modal'].includes(actionName))return;try{if(upload){pickTarget=upload.dataset.upload;$('#file-picker').multiple=pickTarget==='merge';$('#file-picker').value='';$('#file-picker').click();return;}if(el&&!el.disabled)await action(actionName,el);}catch(error){toast(error.message,true);}});
 $('#file-picker').addEventListener('change',e=>{if(e.target.files.length)readFiles([...e.target.files],pickTarget).catch(e=>toast(e.message,true));});
 document.addEventListener('change',async e=>{const el=e.target;if(busy)return;try{
- if(el.dataset.sheet)await updateSource(el.dataset.sheet,'sheet',el.value);
+ if(el.hasAttribute('data-merge-clean')){state.merge.clean=el.checked;invalidate('merge');dirty('merge');render();}
+ else if(el.hasAttribute('data-merge-totals')){state.merge.totals=el.value;invalidate('merge');dirty('merge');render();}
+ else if(el.hasAttribute('data-merge-auto')){const source=state.merge.files[Number(el.dataset.mergeAuto)];source.autoHeader=el.checked;if(el.checked){const found=await request('merge-header',{source});source.header=found.header;}invalidate('merge');dirty('merge');render();}
+ else if(el.dataset.sheet)await updateSource(el.dataset.sheet,'sheet',el.value);
  else if(el.dataset.header){const value=Number(el.value);if(!Number.isInteger(value)||value<1){el.value=findSource(el.dataset.header)?.header||1;throw new Error('表头行必须是大于零的整数。');}await updateSource(el.dataset.header,'header',value);}
  else if(el.dataset.preserve)await updateSource(el.dataset.preserve,'preserveIdentifiers',el.checked);
  else if(el.hasAttribute('data-group-select')){if(el.checked)state.split.selected.add(el.dataset.groupSelect);else state.split.selected.delete(el.dataset.groupSelect);render();}
@@ -487,7 +822,7 @@ document.addEventListener('drop',e=>{const zone=e.target.closest('[data-upload],
 document.addEventListener('keydown',e=>{if(e.key==='?'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!$('#modal').open)action('help');const tab=e.target.closest('[role="tab"]');if(busy||!tab||!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const keys=Object.keys(modes),i=keys.indexOf(state.mode);state.mode=e.key==='Home'?keys[0]:e.key==='End'?keys.at(-1):keys[(i+(e.key==='ArrowLeft'?-1:1)+keys.length)%keys.length];render();$(`#tab-${state.mode}`).focus();});
 $('#modal').addEventListener('click',e=>{if(e.target===$('#modal')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeModal();}});
 $('#modal').addEventListener('cancel',()=>pendingIntent=null);
-$('#modal').addEventListener('close',()=>{resetTable('group-preview');resetTable('duplicate-preview');resetTable('expanded-preview');$('#modal-content').innerHTML='';});
+$('#modal').addEventListener('close',()=>{resetTable('group-preview');resetTable('duplicate-preview');resetTable('expanded-preview');resetTable('merge-cleaned');$('#modal-content').innerHTML='';});
 window.addEventListener('beforeunload',e=>{if(busy||Object.values(state.dirty).some(Boolean)){e.preventDefault();e.returnValue='';}});
 function headerHint(){return `<span class="label-hint" title="表头上方的说明行不会导出" aria-label="表头上方的说明行不会导出">${icon('info')}</span>`;}
 function emptyPreview(title,description,kind){return `<div class="empty-preview"><div class="empty-art" aria-hidden="true"><div class="empty-paper">${icon(kind)}</div><span class="empty-star">✧</span></div><strong class="empty-title">${title}</strong><p>${description}</p></div>`;}
@@ -504,10 +839,10 @@ function renderGuide(){
       ['整理分组并下载',`${guideFile('研发部-1.xlsx','file','1 行')}${guideFile('销售部-1.xlsx','file','1 行')}<div class="mini-action">${icon('download')}下载 ZIP</div>`,'可查看每组全部数据、修改名称或合并分组，并支持撤销。下载的文件名自动带上条目数。']
     ],tip:'表头不在第一行？将“表头所在行”改为实际行号，表头上方的说明行不会导出。'},
     merge:{name:'合表',intro:'将多份文件的数据，按你指定的顺序追加到一张表。',steps:[
-      ['添加多个文件',`${guideFile('11月订单.xlsx','file')}${guideFile('12月订单.xlsx','file')}<div class="mini-setting"><span>工作表</span><b>订单</b><span>表头行</span><b>1</b></div>`,'一次选择多份文件。每份文件可指定一张工作表，以及各自的表头行。'],
+      ['添加多个文件',`${guideFile('11月订单.xlsx','file')}${guideFile('12月订单.xlsx','file')}<div class="mini-setting"><span>工作表</span><b>订单</b><span>表头</span><b>自动识别</b></div>`,'一次选择多份文件，默认自动识别表头。每份文件可选择工作表，也可手动修改表头行号。'],
       ['调整合并顺序',`<div class="mini-sort"><div>${icon('grip')}<b>1</b><span>12月订单.xlsx</span></div><div>${icon('grip')}<b>2</b><span>11月订单.xlsx</span></div></div><div class="mini-drag-hint">${icon('up')}${icon('down')}拖动卡片或使用上下按钮</div>`,'按住卡片拖动，或用上下按钮排序。排在前面的文件，数据也会出现在前面。'],
-      ['预览合并结果',`${guideTable(['编号','月份','金额'],[['ORD02','12月','100'],['ORD01','11月','80']])}<div class="mini-action">${icon('download')}下载 Excel</div>`,'点击「合并并预览」。字段按表头名称对齐，缺少的字段留空，确认后下载 Excel。']
-    ],tip:'合并只保留一行表头，保留所有数据行，不会自动去重。'},
+      ['预览合并结果',`${guideTable(['编号','月份','金额'],[['ORD02','12月','100'],['ORD01','11月','80'],['合计','','180']])}<div class="mini-action">${icon('download')}下载 Excel</div>`,'点击「合并并预览」，自动清理分页结构和原表统计，对可确认求和的字段重算总合计。可查看清理明细，核对后直接下载 Excel。']
+    ],tip:'默认清理重复表头、页脚和原表统计，确认求和的列重算总合计；业务明细不会按内容去重。'},
     lookup:{name:'Lookup',intro:'通过共同字段，从参照表中找到数据并补充到主表。',steps:[
       ['选择主表和参照表',`<div class="mini-table-label">主表 · 需要补充数据</div>${guideTable(['员工编号','姓名'],[['EB001','林晓']])}<div class="mini-table-label">参照表 · 提供数据</div>${guideTable(['员工编号','部门'],[['EB001','研发部']])}`,'主表是需要补全的表，参照表提供要查找的数据。分别选择工作表和表头行。'],
       ['连接字段，选择返回值',`<div class="mini-link"><div><span>主表匹配列</span><b>员工编号</b></div>${icon('link')}<div><span>参照表匹配列</span><b>员工编号</b></div></div><div class="mini-return">返回字段<span>${icon('check')}部门</span></div>`,'两侧都选择能识别同一条记录的字段，如「员工编号」；再勾选要返回的字段，可多选。'],
