@@ -1,12 +1,12 @@
 # ExcelBomb 项目约定
 
-- 用户明确要求：仅在本地部署和运行，以后不再制作或发布线上版本。
-- 后续修改只更新 `site/dist/`、本机服务以及根目录的 `ExcelBomb.html` 离线文件。
+- 用户于 2026-11-27 明确授权将仓库更名为 `SEU-Peter/ExcelBomb`、设为公开并部署 GitHub Pages。本次指令更新此前“仅本地”的限制，同时继续保留本地服务和离线版。
+- 功能源码维护在 `site/dist/`，同步本机服务和根目录的 `ExcelBomb.html` 离线文件；GitHub Pages 通过 `.github/workflows/deploy-pages.yml` 发布同一份静态网页。
 - 本机服务固定绑定 `127.0.0.1:8769`，在 `site/` 下执行 `npm start`。
 - 修改页面后执行 `npm run build:offline` 同步离线文件，并进行与改动相称的检查。
-- 未经用户后续明确要求，不得创建、更新、发布线上站点，也不得向远程仓库推送源代码用于部署。
+- 已授权向公开仓库 `SEU-Peter/ExcelBomb` 推送开发代码并部署 GitHub Pages；不代表授权创建其他托管平台上的站点。
 - 现有 `.openai/hosting.json` 和站点发布记录仅为历史配置，不代表继续线上部署的授权。
-- 用户于 2026-11-25 明确授权推送至 GitHub 开发仓库 `SEU-Peter/ExcekBomb` 并发布 macOS / Win7 Release；这仅授权源码管理和安装包分发，不授权线上应用部署。根目录 Git 为开发仓库，历史站点 Git 已移到不提交的 `.local-backups/`。
+- 仓库曾误名为 `ExcekBomb`，现名为 `ExcelBomb`。用户此前授权的 macOS / Win7 Release 分发继续保留。根目录 Git 为开发仓库，历史站点 Git 已移到不提交的 `.local-backups/`。
 - `test/` 中是供用户手动体验功能的测试表格，后续修改须保留。
 - Lookup 未匹配的返回单元格必须保留为空，不默认填入“未匹配”等文字。
 - 拆表导出按“名称-条目数.xlsx”命名，例如“一室-23.xlsx”；重命名、合并和文件名冲突处理后，页面预览必须与 ZIP 实际文件名一致。

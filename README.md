@@ -1,21 +1,20 @@
 # ExcelBomb
 
-一个只在本机运行的 Excel 工作台，用可视化操作完成拆表、合表和 Lookup。无需安装 Office，支持读取 `.xlsx`、`.xls`、`.csv`，统一导出 `.xlsx`。
+一个在浏览器中处理数据的 Excel 工作台，支持 GitHub Pages 在线访问及本地 / 离线运行，用可视化操作完成拆表、合表和 Lookup。无需安装 Office，支持读取 `.xlsx`、`.xls`、`.csv`，统一导出 `.xlsx`。
 
-**[下载最新 Win7 版](https://github.com/SEU-Peter/ExcekBomb/releases/latest)** · [v1.1.5 发布说明](docs/releases/v1.1.5.md) · [开发与测试说明](DEVELOPMENT.md)
+**[在线使用](https://seu-peter.github.io/ExcelBomb/)** · [离线单文件（可另存为）](https://seu-peter.github.io/ExcelBomb/ExcelBomb.html) · **[下载最新 Win7 版](https://github.com/SEU-Peter/ExcelBomb/releases/latest)** · [v1.1.5 发布说明](docs/releases/v1.1.5.md) · [开发与测试说明](DEVELOPMENT.md)
 
-本项目的 GitHub 仓库名为 **ExcekBomb**，软件名称为 **ExcelBomb**。GitHub 用于源码管理与安装包分发；软件仅在本地运行，不提供在线处理网站。选择的表格在浏览器内处理，不上传到服务器，原文件不会被修改。
+GitHub 仓库与软件名称均为 **ExcelBomb**。仓库公开维护源码，通过 GitHub Pages 提供在线入口，通过 Release 分发安装包。在线版和本地版都在当前浏览器内读取和处理表格，不上传表格内容，原文件不会被修改。
 
 ![ExcelBomb 拆表预览](docs/images/split.png)
 
 ## 当前版本：Win7 v1.1.5 / macOS v1.1.3
 
-本次仅发布 Win7 安装包，macOS 使用包保留 v1.1.3；仓库本地网页和离线文件也已同步合表修复。
+当前网页与离线单文件使用最新 v1.1.5 功能代码，包含批量行号、备注及原格式合表。已发布的 Win7 安装包为 v1.1.5；macOS 安装包保留 v1.1.3，旧包不含本次合表更新，Mac 用户可使用在线版或最新离线单文件。
 
 - **批量设置数据开始行：** 可一次应用表头行和数据开始行到全部文件，仍可逐个调整。
 - **保留原表格式：** 合表默认保留 XLSX 的字体、颜色、边框、对齐、数字格式、行高、列宽、表头及有效合并区域；第一份文件提供表头和列宽，各份明细保留各自样式。
 - **单行备注表尾：** 自动识别备注，也可指定最后一行为备注；导出时移至表末，相同备注保留一份，不同备注分别保留。
-
 - **合表自动整理：** 自动识别表头，清理重复分页表头、页码、打印时间和制表签字等结构行及原表合计 / 小计。
 - **确认后重新汇总：** 对可确认求和的列重算一行总合计，不相加编号、日期、单价和比例；内容相同的业务记录仍保留。可查看清理明细，或选择只保留明细、关闭清理。
 - **异常空日期兼容：** 修复可复现的 `.match` 读取和导出错误，兼容异常空日期单元格，原文件保持不变。
@@ -35,11 +34,11 @@
 
 | 系统 | 下载文件 | 启动方式 |
 | --- | --- | --- |
-| macOS | [下载 Mac 版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.3/ExcelBomb-macOS-1.1.3.zip) | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
-| Windows 7 32 位 | [下载 Win7 x86 版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.5/ExcelBomb-Win7-x86-1.1.5.zip) | 完整解压后双击顶层唯一的 `01-Install-ExcelBomb.exe`。`00-Start-Here.html` 提供中文图文安装指引。 |
-| Windows 7 32/64 位通用 | [下载 Win7 通用版](https://github.com/SEU-Peter/ExcekBomb/releases/download/v1.1.5/ExcelBomb-Win7-1.1.5.zip) | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
+| macOS | [下载 Mac 版](https://github.com/SEU-Peter/ExcelBomb/releases/download/v1.1.3/ExcelBomb-macOS-1.1.3.zip) | 双击 `启动 ExcelBomb.command`；需要 Python 3。也可直接用现代浏览器打开 `ExcelBomb.html`，无需 Python 和本地服务。 |
+| Windows 7 32 位 | [下载 Win7 x86 版](https://github.com/SEU-Peter/ExcelBomb/releases/download/v1.1.5/ExcelBomb-Win7-x86-1.1.5.zip) | 完整解压后双击顶层唯一的 `01-Install-ExcelBomb.exe`。`00-Start-Here.html` 提供中文图文安装指引。 |
+| Windows 7 32/64 位通用 | [下载 Win7 通用版](https://github.com/SEU-Peter/ExcelBomb/releases/download/v1.1.5/ExcelBomb-Win7-1.1.5.zip) | 安装器本身为 32 位，自动检测系统并选择对应程序；无需安装 Python、Node、Go、Office 或额外运行库。 |
 
-仓库为私有开发仓库，查看源码和下载附件需要登录有访问权限的 GitHub 账号。
+仓库现已公开，源码和 Release 安装包可直接访问。GitHub Pages 提供现代浏览器版；Win7 用户请使用上方的独立兼容包。
 
 启动器打开 `http://127.0.0.1:8769/`，服务只监听本机。所有脚本、字体和处理库均随包附带，使用时无需联网。两个平台都附带虚构测试表格，Mac 位于 `test/`，Win7 位于 `Support/test/`。
 
@@ -119,13 +118,19 @@ ExcelBomb-Win7/
 
 ## 源码与第三方组件
 
+### GitHub Pages
+
+在线地址：<https://seu-peter.github.io/ExcelBomb/>。网页、字体、处理库和 Worker 全部由仓库提供；表格只在浏览器中处理。可将在线提供的 `ExcelBomb.html` 另存为本地文件后离线使用。
+
+推送 `main` 中的网页或构建代码后，`.github/workflows/deploy-pages.yml` 自动构建并运行核心回归检查，然后仅发布静态网页资源和离线 HTML。也可在 Actions 中手动执行 **Deploy GitHub Pages**。仓库历史、测试表格、构建工具及安装包不作为站点内容发布。
+
 ### 从源码运行
 
-有仓库访问权限时，可克隆源码并使用 Python 3 启动本地服务：
+可直接克隆公开源码，并使用 Python 3 启动本地服务：
 
 ```sh
-git clone https://github.com/SEU-Peter/ExcekBomb.git
-cd ExcekBomb
+git clone https://github.com/SEU-Peter/ExcelBomb.git
+cd ExcelBomb
 python3 site/scripts/local_server.py --serve
 ```
 
@@ -150,7 +155,7 @@ npm test
 | `test/` | 可手动体验功能的虚构测试表格 |
 | `docs/releases/` | 各版本发布说明 |
 
-GitHub 管理开发源码，安装包通过 Release 附件分发；`releases/`、本机配置、依赖缓存和历史站点凭据不提交到仓库。仅在明确要求打包或生成 Release 时发布新版本，不部署在线应用。
+GitHub 公开维护开发源码，GitHub Pages 发布静态网页，安装包通过 Release 附件分发；`releases/`、本机配置、依赖缓存和历史站点凭据不提交到仓库。网页功能代码通过 GitHub Actions 自动部署到 GitHub Pages；只有明确要求打包或生成 Release 时才另行生成安装包和 Release。
 
 ### 第三方资源
 

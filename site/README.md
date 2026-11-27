@@ -1,10 +1,10 @@
 # ExcelBomb
 
-浏览器本地 Excel 工作台：拆表、合表、Lookup。无需后端，处理文件不发送网络请求。
+浏览器 Excel 工作台：拆表、合表、Lookup。支持在线、本地服务和离线 HTML，表格处理不向服务器发送文件内容。
 
 ## 运行
 
-本项目仅在本地部署和运行，后续不再发布或更新线上版本。
+在线入口为 https://seu-peter.github.io/ExcelBomb/ ，由公开仓库 `SEU-Peter/ExcelBomb` 的 GitHub Actions 发布到 GitHub Pages。在线版和下列本地入口使用同一份功能代码，计算均在浏览器内执行。
 
 在此目录执行 `npm start`，访问 http://127.0.0.1:8769 。服务只绑定本机地址。所有脚本、字体均已随站点打包。
 

@@ -1,6 +1,6 @@
 # 开发、测试与打包
 
-本仓库只维护本地运行的软件。GitHub 用于开发源码和 Release 分发，不启用 Pages，也不部署在线处理服务。
+用户于 2026-11-27 授权公开仓库 `SEU-Peter/ExcelBomb` 并发布 GitHub Pages。项目保留本地服务与离线入口；在线页面也是纯静态应用，表格只在浏览器中处理，不上传服务器。
 
 ## 目录
 
@@ -24,8 +24,8 @@ releases/                    本地构建产物，不提交 Git
 开发使用 Node.js 18 或更新版本；本地 HTTP 服务使用 Python 3。最终用户打开现代版离线 HTML 不需要安装这些开发工具。
 
 ```sh
-git clone https://github.com/SEU-Peter/ExcekBomb.git
-cd ExcekBomb
+git clone https://github.com/SEU-Peter/ExcelBomb.git
+cd ExcelBomb
 python3 site/scripts/local_server.py --serve
 ```
 
@@ -56,6 +56,12 @@ node tests/preserve.browser.test.mjs
 合表专项测试生成含真实异常空日期 XML 的 XLSX，检查读取修复和导出回读；同时覆盖自动 / 手动表头、字段顺序不同、分页表头与签字页脚、原表统计清理、确认后的总合计、业务重复记录保留及清理明细。核心测试另覆盖合并单元格形成的多级表头、无缓存 SUM 和日期 / 编号 / 比例保护。原格式专项测试还核对字体/底色/边框/对齐、冲突数字格式、行高列宽、主题色、条件格式、Excel 表格样式、打印设置、纵向合并区域中途开始及备注去重；通过独立 XLSX 读取和渲染对照核对版式。测试文件在临时目录生成，不修改 `test/`。旧浏览器接口模拟不能替代 Win7 / IE11 真机验收。
 
 `PLAYWRIGHT_MODULE` 可指定现有 Playwright 模块入口，`BROWSER_EXECUTABLE` 可指定浏览器可执行文件。`EXCELBOMB_TEST_URL` 默认指向本机服务，也可设为离线入口的 `file:///绝对路径/ExcelBomb.html`；文件入口会在断网的浏览器上下文中测试。
+
+## GitHub Pages 发布
+
+`.github/workflows/deploy-pages.yml` 在 `main` 网页 / 构建代码变更后运行，也可手动触发。流水线执行离线构建与核心回归检查，上传 `site/dist/` 和生成的 `ExcelBomb.html`，由 GitHub 官方 Pages Actions 发布。仅发布静态资源；不上传本机配置、历史站点凭据、测试表格或安装包。
+
+Pages 设置采用 **GitHub Actions**，在线地址为 `https://seu-peter.github.io/ExcelBomb/`。本地、Pages 和离线入口使用同一份功能源码。修改 README 本身不会重建站点；修改网页、Worker 或构建代码会自动部署。现有安装包不因 Pages 部署而重新打包。
 
 ## macOS 使用包
 
