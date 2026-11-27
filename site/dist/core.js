@@ -122,10 +122,23 @@ export function getMergeData(source){
   const levels=Array.from({length:width},(_,j)=>Array.from({length:found.depth},(_,i)=>labelAt(found.header-1+i,first+j)).filter((v,i,a)=>v&&a.indexOf(v)===i));
   const leaves=levels.map(a=>a[a.length-1]||''),counts=new Map();leaves.forEach(v=>counts.set(headerKey(v),(counts.get(headerKey(v))||0)+1));
   data.headers=uniqueHeaders(levels.map((a,i)=>counts.get(headerKey(leaves[i]))>1?a.join(' / '):leaves[i]));
-  const indices=data.rowNumbers.map((r,i)=>({r,i})).filter(({r})=>r>=found.header+found.depth);
+  const minimum=found.header+found.depth,start=source.dataStart==null||source.dataStart===''?minimum:Number(source.dataStart);
+  if(!Number.isInteger(start)||start<minimum)throw new Error(`数据开始行必须是 ${minimum} 或之后的整数（在表头下方）。`);
+  const indices=data.rowNumbers.map((r,i)=>({r,i})).filter(({r})=>r>=start);
+  if(!indices.length)throw new Error('数据开始行之后没有有效数据，请检查行号。');
   const rows=indices.map(({i})=>data.rows[i]),formats=indices.map(({i})=>data.formats[i]),rowNumbers=indices.map(({r})=>r);
+  // A selected start row can lie inside a vertically merged text field.
+  for(const m of merges)if(m.e.r>m.s.r&&m.s.c===m.e.c){const value=cleanValue(sheet[XLSX.utils.encode_cell(m.s)]?.v),c=m.s.c-first;if(typeof value==='string'&&value&&c>=0&&c<width){let low=0,high=rowNumbers.length;while(low<high){const mid=(low+high)>>1;if(rowNumbers[mid]<m.s.r+1)low=mid+1;else high=mid;}for(let i=low;i<rows.length&&rowNumbers[i]<=m.e.r+1;i++)if(!rows[i][c])rows[i][c]=value;}}
   const formulas={};indices.forEach(({r},i)=>{if(summaryLabel(rows[i],data.headers))formulas[i]=Array.from({length:width},(_,j)=>{const value=sheet[XLSX.utils.encode_cell({r:r-1,c:first+j})]?.f;return typeof value==='string'?value:'';});});
-  return {...data,rows,formats,rowNumbers,repairedDates:source.repairedDates||0,sourceName:source.name||source.sheet,mergeContext:{header:found.header,depth:found.depth,headers:Array.from({length:found.depth},(_,i)=>rawVector(found.header-1+i)),prefix:rawRows.filter(([r])=>r<found.header-1).map(([r])=>rawVector(r)),formulas}};
+  const noteRows=[];if(source.footerNote!=='keep'){
+    const last=rows.length-1,row=rows[last],filled=row.filter(v=>headerKey(v));
+    const mergedNote=merges.some(m=>m.s.r===rowNumbers[last]-1&&m.e.c>m.s.c)&&filled.length===1&&typeof filled[0]==='string';
+    const labelled=/^(?:备注|附注|注|说明)(?:\s*[:：]|$)/.test(display(filled[0]||'').trim());
+    const sparseNote=width>1&&filled.length===1&&typeof filled[0]==='string'&&filled[0].length>=8&&!/^[A-Za-z0-9._/-]+$/.test(filled[0])&&!footerLabel(row,data.headers)&&!summaryLabel(row,data.headers);
+    if(source.footerNote==='last'||labelled||mergedNote||sparseNote)noteRows.push(rowNumbers[last]);
+    for(let i=0;i<rows.length;i++){const values=rows[i].filter(v=>headerKey(v));if(values.length<=2&&/^(?:备注|附注|注|说明)(?:\s*[:：]|$)/.test(display(values[0]||'').trim())&&!rows[i].some((v,c)=>c!==rows[i].findIndex(v=>headerKey(v))&&headerKey(v)&&/序号|编号|编码|^id$/i.test(headerKey(data.headers[c]))))noteRows.push(rowNumbers[i]);}
+  }
+  return {...data,rows,formats,rowNumbers,dataStart:start,repairedDates:source.repairedDates||0,sourceName:source.name||source.sheet,mergeContext:{header:found.header,depth:found.depth,keepNotes:source.footerNote==='keep',noteRows:[...new Set(noteRows)],headers:Array.from({length:found.depth},(_,i)=>rawVector(found.header-1+i)),prefix:rawRows.filter(([r])=>r<found.header-1).map(([r])=>rawVector(r)),formulas}};
 }
 function summaryLabel(row,headers=[]){
   if(!Array.isArray(row))return null;
@@ -173,18 +186,21 @@ export function mergeTables(tables,{clean=true,totals='auto'}={}) {
     if(ids.length)for(let i=0;i<p.entries.length;i++){const row=p.entries[i].values;if(p.headerSet.has(rowKey(row))||summaryLabel(row,p.localHeaders)||footerLabel(row,p.localHeaders))continue;if(ids.some(c=>{const value=display(row[c]).trim();return value&&(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)||value.length<=6||row.filter(v=>headerKey(v)).length>=3);}))lastRecord=i;}
     if(lastRecord>=0)for(let i=lastRecord+1;i<p.entries.length;i++){const values=p.entries[i].values.filter(v=>headerKey(v));if(values.length&&values.length<=3&&values.every(v=>typeof v==='string')){const key=rowKey(p.entries[i].values);p.tailCandidates.add(i);tailCounts.set(key,(tailCounts.get(key)||0)+1);}}
   }
-  const rows=[],formats=[],removed=[],files=[],sumColumns=new Set();let totalLabel=0;
-  for(const p of prepared){
+  const rows=[],formats=[],removed=[],files=[],sumColumns=new Set(),origins=[],notes=[],noteKeys=new Set();let totalLabel=0,summaryOrigin=null;
+  for(let sourceIndex=0;sourceIndex<prepared.length;sourceIndex++){const p=prepared[sourceIndex];
     const kept=[],summaries=[];let segmentStart=0;const stats={name:p.name,header:p.table.mergeContext?.header||p.table.headerRow||1,headers:0,footers:0,summaries:0,input:p.entries.length,kept:0};
     const kinds=p.entries.map(e=>p.headerSet.has(rowKey(e.values))?'header':summaryLabel(e.values,p.localHeaders)?'summary':footerLabel(e.values,p.localHeaders)?'footer':'');
     for(let i=0;i<p.entries.length;i++){
       const entry=p.entries[i],summary=summaryLabel(entry.values,p.localHeaders);let kind=clean?kinds[i]:'';
+      const note=clean&&(p.table.mergeContext?.noteRows||[]).includes(entry.number);
+      if(note){kind='footer';const key=JSON.stringify(entry.values.filter(v=>headerKey(v)).map(v=>display(v).trim()));if(!noteKeys.has(key)){noteKeys.add(key);notes.push({source:sourceIndex,row:entry.number});}}
+      if(p.table.mergeContext?.keepNotes&&kind==='footer'&&/^(?:备注|附注|注|说明)(?:\s*[:：]|$)/.test(display(entry.values.find(v=>headerKey(v))||'').trim()))kind='';
       if(clean&&!kind&&p.prefix.has(rowKey(entry.values))){for(let j=i+1;j<Math.min(i+9,p.entries.length);j++){if(kinds[j]==='header'){kind='header';break;}if(kinds[j]!=='footer'&&!p.prefix.has(rowKey(p.entries[j].values)))break;}}
-      if(clean&&!kind&&p.tailCandidates.has(i)&&(tailCounts.get(rowKey(entry.values))||0)>1)kind='footer';
+      if(clean&&!kind&&!p.table.mergeContext?.keepNotes&&p.tailCandidates.has(i)&&(tailCounts.get(rowKey(entry.values))||0)>1)kind='footer';
       if(kind){
         stats[kind==='header'?'headers':kind==='footer'?'footers':'summaries']++;
-        removed.push({p,entry,reason:kind==='header'?'重复表头 / 页眉':kind==='footer'?'页脚 / 说明':'原表合计 / 小计'});
-        if(kind==='summary'){summaries.push({entry,summary,before:kept.length,segmentStart});segmentStart=kept.length;}
+        removed.push({p,entry,reason:note?'表尾备注（移至导出表末）':kind==='header'?'重复表头 / 页眉':kind==='footer'?'页脚 / 说明':'原表合计 / 小计'});
+        if(kind==='summary'){summaries.push({entry,summary,before:kept.length,segmentStart});segmentStart=kept.length;if(!summaryOrigin||sourceIndex===0)summaryOrigin={source:sourceIndex,row:entry.number};}
       }else kept.push(entry);
     }
     const numericCache=new Map(),formatCache=new Map(),keptFormats=kept.map(e=>e.formats);
@@ -200,7 +216,7 @@ export function mergeTables(tables,{clean=true,totals='auto'}={}) {
         if((explicit&&(all.count||part.count))||close(all)||close(part))sumColumns.add(p.mapping[c]);
       }
     }
-    for(const entry of kept){const row=Array(headers.length).fill(''),format=Array(headers.length).fill('');p.mapping.forEach((target,c)=>{row[target]=entry.values[c];format[target]=entry.formats[c];});rows.push(row);formats.push(format);}
+    for(const entry of kept){const row=Array(headers.length).fill(''),format=Array(headers.length).fill('');p.mapping.forEach((target,c)=>{row[target]=entry.values[c];format[target]=entry.formats[c];});rows.push(row);formats.push(format);origins.push({source:sourceIndex,row:entry.number});}
     stats.kept=kept.length;files.push(stats);
   }
   const dataRows=rows.length;let summaryRowCount=0;
@@ -213,7 +229,8 @@ export function mergeTables(tables,{clean=true,totals='auto'}={}) {
   if(rows.length>1048575)throw new Error('合并结果超过 Excel 单张工作表的行数上限。');
   const removedData={headers:uniqueHeaders(['来源文件','原始行号','清理原因',...headers]),rows:[],formats:[]};
   for(const item of removed){const row=Array(headers.length).fill(''),format=Array(headers.length).fill('');item.p.mapping.forEach((target,c)=>{row[target]=item.entry.values[c];format[target]=item.entry.formats[c];});removedData.rows.push([item.p.name,item.entry.number,item.reason,...row]);removedData.formats.push(['','','',...format]);}
-  return {headers,rows,formats,summaryRowCount,mergeReport:{clean,dataRows,summaryRowCount,repairedDates:prepared.reduce((s,p)=>s+(p.table.repairedDates||0),0),sumColumns:[...sumColumns].map(c=>headers[c]),headersRemoved:files.reduce((s,f)=>s+f.headers,0),footersRemoved:files.reduce((s,f)=>s+f.footers,0),summariesRemoved:files.reduce((s,f)=>s+f.summaries,0),files,removedData}};
+  const footerNotes={rows:[],formats:[]};for(const note of notes){const p=prepared[note.source],entry=p.entries.find(e=>e.number===note.row),row=Array(headers.length).fill(''),format=Array(headers.length).fill('');p.mapping.forEach((target,c)=>{row[target]=entry.values[c];format[target]=entry.formats[c];});footerNotes.rows.push(row);footerNotes.formats.push(format);}
+  return {headers,rows,formats,footerNotes,summaryRowCount,exportPlan:{origins,notes,summaryOrigin,mappings:prepared.map(p=>p.mapping),contexts:prepared.map(p=>({header:p.table.headerRow||1,depth:p.table.mergeContext?.depth||1,firstColumn:p.table.firstColumn||0,dataStart:p.table.dataStart||2}))},mergeReport:{clean,dataRows,summaryRowCount,notesPreserved:notes.length,repairedDates:prepared.reduce((s,p)=>s+(p.table.repairedDates||0),0),sumColumns:[...sumColumns].map(c=>headers[c]),headersRemoved:files.reduce((s,f)=>s+f.headers,0),footersRemoved:files.reduce((s,f)=>s+f.footers,0),summariesRemoved:files.reduce((s,f)=>s+f.summaries,0),files,removedData}};
 }
 export function lookupTables(main,reference,{mainKey,refKey,returns,trim=true,ignoreCase=false,duplicate='first',missing=''}) {
   if(!returns.length)throw new Error('请至少选择一个返回字段。');
@@ -236,9 +253,9 @@ export function groupData(data,group){return {headers:data.headers,rows:group.it
 export function subsetData(data,indices){return {...data,rows:indices.map(i=>data.rows[i]),formats:indices.map(i=>data.formats?.[i]||[]),rowNumbers:indices.map(i=>data.rowNumbers?.[i]??i+1)};}
 export function makeWorkbook(data){
   if(!data||!Array.isArray(data.headers)||!data.headers.length)throw new Error('没有可导出的表格字段。');
-  const rows=Array.isArray(data.rows)?data.rows:[],values=rows.map(row=>Array.from({length:data.headers.length},(_,i)=>{const v=cleanValue(Array.isArray(row)?row[i]:null);return v===''?null:v;}));
+  const rows=Array.isArray(data.rows)?data.rows:[],allRows=[...rows,...(data.footerNotes?.rows||[])],values=allRows.map(row=>Array.from({length:data.headers.length},(_,i)=>{const v=cleanValue(Array.isArray(row)?row[i]:null);return v===''?null:v;}));
   const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([data.headers.map(v=>cleanValue(v)),...values],{cellDates:true});
-  if(Array.isArray(data.formats))data.formats.forEach((row,i)=>{if(!Array.isArray(row))return;row.forEach((format,j)=>{const cell=ws[XLSX.utils.encode_cell({r:i+1,c:j})],safe=cleanFormat(format);if(safe&&cell)cell.z=safe;});});
+  if(Array.isArray(data.formats))[...data.formats,...(data.footerNotes?.formats||[])].forEach((row,i)=>{if(!Array.isArray(row))return;row.forEach((format,j)=>{const cell=ws[XLSX.utils.encode_cell({r:i+1,c:j})],safe=cleanFormat(format);if(safe&&cell)cell.z=safe;});});
   ws['!cols']=data.headers.map(h=>({wch:Math.max(14,Math.min(display(h).length*2+2,30))}));
   const filteredRows=rows.length-(data.summaryRowCount||0);
   if(filteredRows>0)ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:filteredRows,c:data.headers.length-1}})};

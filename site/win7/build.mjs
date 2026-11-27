@@ -14,10 +14,11 @@ const escapeScript=source=>source.replace(/<\/script/gi,'<\\/script');
 const polyfill=fs.readFileSync(path.join(root,'node_modules/core-js-bundle/minified.js'),'utf8');
 const adaptLimits=source=>{if(!source.includes('rows:200000,columns:1000,cells:5000000'))throw new Error('Core capacity settings changed; review Win7 limits.');return source.replace('rows:200000,columns:1000,cells:5000000','rows:50000,columns:1000,cells:500000');};
 const core=adaptLimits(read('core.js').replace(/^export /gm,''));
+const preserve=read('preserve.js').replace(/^export /gm,'').replace(/^import .*;\r?\n/gm,'');
 let runtime=fs.readFileSync(path.join(root,'../src/worker-runtime.js'),'utf8');
 runtime=runtime.replace('let result;','let result; if(kind===\'zip\'&&payload.groups.length>500)throw new Error(\'Win7 兼容版单次最多生成 500 个拆分文件，请合并分组或分批处理。\');');
 runtime=runtime.replace('for(let i=0;i<payload.groups.length;i++){progress','for(let i=0;i<payload.groups.length;i++){await new Promise(resolve=>setTimeout(resolve,0));progress');
-const workerCore=compile(core+'\n'+runtime,'worker engine');
+const workerCore=compile(core+'\n'+preserve+'\n'+runtime,'worker engine');
 const worker=`importScripts('vendor/core-js-bundle.min.js','vendor/xlsx.full.min.js','vendor/jszip.min.js');\n${workerCore}`;
 parse(worker,{ecmaVersion:5,allowReserved:true});fs.writeFileSync(path.join(out,'worker.js'),worker);
 let app=read('app.js').replace(/^import .* from '\.\/core.js';\r?\n/m,'');
@@ -33,7 +34,7 @@ app=app.replace("async function readFiles(files,target,confirmed=false){",`async
 app=app.replace("const loaded=await request('read',{files:inputs,merge:target==='merge'},inputs.map(f=>f.buffer));","const loaded=await request('read',{files:inputs,merge:target==='merge'},inputs.map(f=>f.buffer));loaded.forEach((source,i)=>source.fileSize=files[i].size);");
 app=app.replace("后台处理中，可继续查看使用说明","处理中，请保持页面打开");
 const legacyMain=compile(`(function(){\n${core}\n${app}\n})();`,'application');
-const engine=compile(`window.ExcelBombLegacyEngine=function(self){\n${core}\n${runtime}\n};`,'fallback engine');
+const engine=compile(`window.ExcelBombLegacyEngine=function(self){\n${core}\n${preserve}\n${runtime}\n};`,'fallback engine');
 const compat=fs.readFileSync(path.join(root,'compat.js'),'utf8');parse(compat,{ecmaVersion:5,allowReserved:true});
 let cssTree=postcss.parse(read('style.css'));const variables={};cssTree.walkRules(':root',rule=>rule.walkDecls(decl=>{if(decl.prop.startsWith('--'))variables[decl.prop]=decl.value;}));
 function resolve(value){for(let i=0;i<6&&value.includes('var(');i++)value=value.replace(/var\((--[\w-]+)(?:,\s*([^)]*))?\)/g,(_,key,fallback)=>variables[key]||fallback||'0px');return value.replaceAll('dvh','vh').replace(/min\(48vh,\s*430px\)/g,'430px');}
